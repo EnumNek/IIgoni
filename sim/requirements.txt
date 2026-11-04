@@ -1,0 +1,10 @@
+# Часть sim/ — Python 3.11
+eclipse-sumo==1.28.0      # SUMO: sumo, netconvert, netgenerate, randomTrips.py
+sumolib==1.28.0           # чтение .net.xml (версия = версии SUMO)
+pyproj>=3.6               # перевод координат сети UTM → lon/lat
+networkx>=3.2             # проверка связности сети при закрытии рёбер
+numpy>=1.26
+pandas>=2.1
+pyarrow>=15               # Parquet
+matplotlib>=3.8           # графики отчёта
+pytest>=8                 # тесты (sim/tests)

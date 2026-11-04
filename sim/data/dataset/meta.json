@@ -1,0 +1,102 @@
+{
+  "created_at": "2026-11-04T07:47:28+00:00",
+  "n_scenarios_requested": 300,
+  "master_seed": 2026,
+  "scenarios": 301,
+  "ok": 301,
+  "edge_rows": 251636,
+  "node_rows": 95718,
+  "workers": 4,
+  "cpu_count": 4,
+  "wall_seconds_this_run": 1137.8,
+  "scenarios_this_run": 301,
+  "sumo_version": "Eclipse SUMO sumo 1.28.0",
+  "network": {
+    "source": "osm",
+    "osm_file": "map.osm",
+    "osm_bounds": [
+      69.12229,
+      54.85714,
+      69.17301,
+      54.87391
+    ],
+    "cropped": true,
+    "net_file": "sim/data/base.net.xml",
+    "crs": "EPSG:4326",
+    "bbox": [
+      69.1202078,
+      54.8554269,
+      69.1868258,
+      54.8807345
+    ],
+    "n_nodes": 318,
+    "n_edges": 836,
+    "n_traffic_lights": 31,
+    "total_length_km": 108.26,
+    "units": {
+      "length": "m",
+      "speed": "m/s"
+    },
+    "sumo_version": "Eclipse SUMO sumo 1.28.0",
+    "generated_at": "2026-11-04T07:23:23+00:00"
+  },
+  "simulation": {
+    "begin": 0,
+    "end": 3600,
+    "warmup": 300,
+    "insertion_rate_veh_h": 6000,
+    "sumo_seed": 42,
+    "time_to_teleport": 300,
+    "rerouting_period": 120
+  },
+  "generator": {
+    "min_changes": 1,
+    "max_changes": 5,
+    "type_weights": {
+      "lanes": 0.3,
+      "speed": 0.25,
+      "close": 0.2,
+      "traffic_light": 0.2,
+      "open": 0.05
+    },
+    "lanes_range": [
+      1,
+      4
+    ],
+    "speed_choices_kmh": [
+      20,
+      30,
+      40,
+      50,
+      60,
+      70,
+      80
+    ]
+  },
+  "columns": {
+    "edges.parquet": {
+      "scenario_id": "номер сценария (0 — базовая сеть)",
+      "edge_id": "id ребра (как в network.json)",
+      "lanes": "число полос после изменений",
+      "speed_limit": "разрешённая скорость после изменений, м/с",
+      "closed": "ребро закрыто для движения",
+      "changed": "состояние ребра отличается от базового",
+      "occupancy": "ЦЕЛЬ: доля занятой длины ребра, 0..1 (для закрытых — 0)",
+      "mean_speed": "ЦЕЛЬ: средняя скорость машин, м/с (для закрытых — NaN)",
+      "travel_time": "ЦЕЛЬ: среднее время проезда ребра, с (для закрытых — NaN)",
+      "density": "плотность, авт/км",
+      "waiting_time": "суммарное время стоянки машин на ребре, с",
+      "time_loss": "суммарные потери времени относительно свободного движения, с",
+      "entered": "число въехавших на ребро машин",
+      "left": "число съехавших с ребра машин",
+      "sampled_seconds": "машино-секунды на ребре (объём работы ребра)"
+    },
+    "nodes.parquet": {
+      "scenario_id": "номер сценария",
+      "node_id": "id узла (как в network.json)",
+      "type": "тип узла SUMO после изменений (traffic_light, priority, ...)",
+      "tl_type": "тип программы светофора: static / actuated / null",
+      "changed": "режим управления узлом отличается от базового"
+    }
+  }
+}

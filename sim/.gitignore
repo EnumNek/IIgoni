@@ -1,0 +1,8 @@
+# Промежуточные файлы генерации (воспроизводятся командами из README)
+data/dataset/parts/
+data/work/
+data/calibration/
+data/baseline/work/
+data/*.tmp.xml
+__pycache__/
+.pytest_cache/

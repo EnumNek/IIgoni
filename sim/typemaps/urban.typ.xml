@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Типы дорог для импорта OSM в netconvert (городской район).
+
+  Почему свой файл, а не стандартный osmNetconvert.typ.xml:
+  1) Стандартный файл задаёт загородные скорости (secondary — 100 км/ч,
+     tertiary — 80 км/ч). Для города это неверно: по ПДД Республики Казахстан
+     в населённых пунктах разрешено не более 60 км/ч, в жилых зонах — 20 км/ч.
+     Для жилых улиц принята типичная фактическая скорость 40 км/ч.
+     Если у дороги в OSM есть тег maxspeed, он имеет приоритет над типом.
+  2) В файле перечислены ТОЛЬКО типы, по которым ездят легковые машины.
+     Дороги других типов (service — дворы и парковки, footway, path, cycleway ...)
+     netconvert при импорте пропускает: так модель района остаётся компактной.
+  numLanes — число полос в одном направлении, если в OSM нет тега lanes.
+-->
+<types>
+    <type id="highway.motorway"       numLanes="2" speed="22.22" priority="14" oneway="true"  allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.motorway_link"  numLanes="1" speed="16.67" priority="9"  oneway="true"  allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.trunk"          numLanes="2" speed="16.67" priority="13" oneway="false" allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.trunk_link"     numLanes="1" speed="16.67" priority="8"  oneway="false" allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.primary"        numLanes="2" speed="16.67" priority="12" oneway="false" allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.primary_link"   numLanes="1" speed="16.67" priority="7"  oneway="false" allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.secondary"      numLanes="1" speed="16.67" priority="11" oneway="false" allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.secondary_link" numLanes="1" speed="16.67" priority="6"  oneway="false" allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.tertiary"       numLanes="1" speed="16.67" priority="10" oneway="false" allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.tertiary_link"  numLanes="1" speed="16.67" priority="5"  oneway="false" allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.unclassified"   numLanes="1" speed="11.11" priority="4"  oneway="false" allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.residential"    numLanes="1" speed="11.11" priority="3"  oneway="false" allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+    <type id="highway.living_street"  numLanes="1" speed="5.56"  priority="2"  oneway="false" allow="passenger bus truck trailer delivery evehicle taxi motorcycle emergency authority army vip coach private hov custom1 custom2"/>
+</types>

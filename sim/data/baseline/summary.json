@@ -1,0 +1,17 @@
+{
+  "veh_loaded": 6001,
+  "veh_inserted": 5991,
+  "veh_running": 501,
+  "veh_waiting": 10,
+  "teleports": 4,
+  "teleports_jam": 0,
+  "trips_completed": 5490,
+  "trip_duration_mean": 254.89,
+  "trip_length_mean": 1866.71,
+  "trip_speed_mean": 8.71,
+  "trip_waiting_mean": 84.39,
+  "trip_time_loss_mean": 125.98,
+  "depart_delay_mean": 1.66,
+  "total_time_loss_h": 192.12,
+  "sumo_seconds": 13.153
+}
