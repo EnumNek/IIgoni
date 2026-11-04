@@ -1,0 +1,91 @@
+{
+  "env": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz (ядер: 4)",
+    "torch_threads": 2,
+    "torch": "2.15.0+cu132",
+    "python": "3.11.18"
+  },
+  "district": {
+    "n_edges": 836,
+    "n_nodes": 318,
+    "runs": 50,
+    "predict_ms_median": 7.740038000065397,
+    "predict_ms_p95": 8.988832549937342,
+    "model_ms_median": 3.7272490000077596,
+    "model_ms_p95": 4.251087500017547,
+    "cold_start_ms": 43.145616000174414
+  },
+  "scaling": [
+    {
+      "n_edges": 80,
+      "n_nodes": 32,
+      "runs": 15,
+      "predict_ms_median": 2.0027580001169554,
+      "predict_ms_p95": 2.3772055999643262,
+      "model_ms_median": 1.448686000003363,
+      "model_ms_p95": 1.746354800047811,
+      "grid": "4x4"
+    },
+    {
+      "n_edges": 288,
+      "n_nodes": 96,
+      "runs": 15,
+      "predict_ms_median": 3.740842000070188,
+      "predict_ms_p95": 4.294995500049481,
+      "model_ms_median": 2.1146270000826917,
+      "model_ms_p95": 2.444472100023631,
+      "grid": "8x8"
+    },
+    {
+      "n_edges": 624,
+      "n_nodes": 192,
+      "runs": 15,
+      "predict_ms_median": 6.590037000023585,
+      "predict_ms_p95": 7.57128229997761,
+      "model_ms_median": 3.4133169999677193,
+      "model_ms_p95": 3.8588408000123304,
+      "grid": "12x12"
+    },
+    {
+      "n_edges": 1088,
+      "n_nodes": 320,
+      "runs": 15,
+      "predict_ms_median": 12.00510600006055,
+      "predict_ms_p95": 19.306407600060986,
+      "model_ms_median": 4.466090000050826,
+      "model_ms_p95": 4.778584799942109,
+      "grid": "16x16"
+    },
+    {
+      "n_edges": 2400,
+      "n_nodes": 672,
+      "runs": 15,
+      "predict_ms_median": 18.47875099997509,
+      "predict_ms_p95": 20.27854580001076,
+      "model_ms_median": 10.745511999857627,
+      "model_ms_p95": 11.223795999922004,
+      "grid": "24x24"
+    },
+    {
+      "n_edges": 4224,
+      "n_nodes": 1152,
+      "runs": 15,
+      "predict_ms_median": 33.19269999997232,
+      "predict_ms_p95": 39.46617989995502,
+      "model_ms_median": 14.19486899999356,
+      "model_ms_p95": 15.01985390007121,
+      "grid": "32x32"
+    },
+    {
+      "n_edges": 9408,
+      "n_nodes": 2496,
+      "runs": 15,
+      "predict_ms_median": 74.44950299986886,
+      "predict_ms_p95": 104.79064229982666,
+      "model_ms_median": 32.1362820000104,
+      "model_ms_p95": 38.2482654000114,
+      "grid": "48x48"
+    }
+  ],
+  "reference": {}
+}
