@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+# Сети, построенные под чужие/внешние сети (sim/, пути к .net.xml),
+# пересоздаются автоматически
+networks/*
+!networks/grid2x2/
+!networks/grid4x4/
+# Сгенерированные маршруты (десятки МБ) — воспроизводятся по семенам:
+# python -m agents.networks
+networks/*/routes/
+models/_ablation/

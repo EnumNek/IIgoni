@@ -1,0 +1,28 @@
+# Часть agents/ — RL-агенты светофоров. Python 3.11.
+# Версии зафиксированы те, на которых получены результаты в reports/.
+#
+# torch без GPU (меньше скачивать):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r agents/requirements.txt
+
+# SUMO: симулятор + Python-библиотеки
+eclipse-sumo==1.28.0
+libsumo==1.28.0        # прямой вызов SUMO без сокета TraCI, ускорение в ~10 раз
+sumolib==1.28.0
+traci==1.28.0
+
+# RL
+sumo-rl==1.4.5
+stable-baselines3==2.9.2
+torch>=2.2
+gymnasium==1.4.0
+pettingzoo==1.27.0
+
+# Данные и графики
+numpy>=1.26
+pandas>=2.1
+matplotlib>=3.8
+pyproj>=3.6            # геопривязка сетей из OSM (lon/lat для network.json)
+
+# Тесты
+pytest>=8

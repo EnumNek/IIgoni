@@ -1,0 +1,43 @@
+<?xml version='1.0' encoding='utf-8'?>
+<additional>
+  <tlLogic id="A0" type="actuated" programID="actuated" offset="0">
+    <phase duration="33" state="GGGgrrrrGGGgrrrr" minDur="5" maxDur="50" />
+    <phase duration="3" state="yyygrrrryyygrrrr" />
+    <phase duration="6" state="rrrGrrrrrrrGrrrr" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrryrrrrrrryrrrr" />
+    <phase duration="33" state="rrrrGGGgrrrrGGGg" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrrryyygrrrryyyg" />
+    <phase duration="6" state="rrrrrrrGrrrrrrrG" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrrrrrryrrrrrrry" />
+  </tlLogic>
+  <tlLogic id="A1" type="actuated" programID="actuated" offset="0">
+    <phase duration="33" state="GGGgrrrrGGGgrrrr" minDur="5" maxDur="50" />
+    <phase duration="3" state="yyygrrrryyygrrrr" />
+    <phase duration="6" state="rrrGrrrrrrrGrrrr" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrryrrrrrrryrrrr" />
+    <phase duration="33" state="rrrrGGGgrrrrGGGg" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrrryyygrrrryyyg" />
+    <phase duration="6" state="rrrrrrrGrrrrrrrG" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrrrrrryrrrrrrry" />
+  </tlLogic>
+  <tlLogic id="B0" type="actuated" programID="actuated" offset="0">
+    <phase duration="33" state="GGGgrrrrGGGgrrrr" minDur="5" maxDur="50" />
+    <phase duration="3" state="yyygrrrryyygrrrr" />
+    <phase duration="6" state="rrrGrrrrrrrGrrrr" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrryrrrrrrryrrrr" />
+    <phase duration="33" state="rrrrGGGgrrrrGGGg" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrrryyygrrrryyyg" />
+    <phase duration="6" state="rrrrrrrGrrrrrrrG" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrrrrrryrrrrrrry" />
+  </tlLogic>
+  <tlLogic id="B1" type="actuated" programID="actuated" offset="0">
+    <phase duration="33" state="GGGgrrrrGGGgrrrr" minDur="5" maxDur="50" />
+    <phase duration="3" state="yyygrrrryyygrrrr" />
+    <phase duration="6" state="rrrGrrrrrrrGrrrr" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrryrrrrrrryrrrr" />
+    <phase duration="33" state="rrrrGGGgrrrrGGGg" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrrryyygrrrryyyg" />
+    <phase duration="6" state="rrrrrrrGrrrrrrrG" minDur="5" maxDur="50" />
+    <phase duration="3" state="rrrrrrryrrrrrrry" />
+  </tlLogic>
+</additional>
