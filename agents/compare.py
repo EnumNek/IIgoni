@@ -34,6 +34,7 @@ import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.ticker  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import sumolib  # noqa: E402
@@ -51,6 +52,7 @@ METRICS = {
     "avg_queue_length": ("Средняя очередь на перекрёсток", "авт."),
     "avg_time_loss": ("Средние потери времени", "с"),
     "avg_depart_delay": ("Средняя задержка въезда", "с"),
+    "p95_waiting_time": ("95-й процентиль ожидания", "с"),
     "throughput": ("Завершённых поездок", "авт."),
     "teleports": ("Телепортаций (заторов)", "шт."),
 }
@@ -64,7 +66,7 @@ plt.rcParams.update({
     "font.family": "DejaVu Sans", "font.size": 10,
     "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,
     "axes.edgecolor": AXIS, "axes.labelcolor": INK2, "axes.titlecolor": INK,
-    "axes.titlesize": 11, "axes.titleweight": "semibold", "axes.titlelocation": "left",
+    "axes.titlesize": 11, "axes.titleweight": "bold", "axes.titlelocation": "left",
     "axes.spines.top": False, "axes.spines.right": False,
     "axes.grid": True, "axes.grid.axis": "y", "grid.color": GRID, "grid.linewidth": 0.8,
     "xtick.color": MUTED, "ytick.color": MUTED, "xtick.labelcolor": INK2, "ytick.labelcolor": INK2,
@@ -92,6 +94,7 @@ def run_all(specs: list[str], levels: list[str], seeds: list[int]) -> pd.DataFra
                     row = {"scenario": sc.key, "demand": level, "seed": seed, "mode": mode,
                            **{k: r[k] for k in METRICS}, "vehicles": r["vehicles"],
                            "p95_travel_time": float(np.percentile(r["travel_times"], 95)),
+                           "guard_rate": r["guard_rate"],
                            "wall_time_s": round(r["wall_time"], 1)}
                     rows.append(row)
                     for ts, q in r["per_tls_queue"].items():
@@ -114,16 +117,15 @@ def run_all(specs: list[str], levels: list[str], seeds: list[int]) -> pd.DataFra
 # Таблицы
 # ---------------------------------------------------------------------------
 def summarize(df: pd.DataFrame) -> pd.DataFrame:
-    metrics = [*METRICS, "p95_travel_time"]
+    metrics = [*METRICS, "p95_travel_time", "guard_rate"]
     g = df.groupby(["scenario", "demand", "mode"])[metrics]
     mean, std = g.mean(), g.std(ddof=0)
     out = mean.add_suffix("_mean").join(std.add_suffix("_std")).reset_index()
     for m in metrics:
         base = out[out["mode"] == "fixed"].set_index(["scenario", "demand"])[f"{m}_mean"]
-        ref = out.set_index(["scenario", "demand"]).index.map(base.get)
-        out[f"{m}_vs_fixed_pct"] = np.where(np.asarray(ref, dtype=float) > 0,
-                                            (out[f"{m}_mean"] - np.asarray(ref, dtype=float))
-                                            / np.asarray(ref, dtype=float) * 100, np.nan)
+        ref = np.asarray(out.set_index(["scenario", "demand"]).index.map(base.get), dtype=float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            out[f"{m}_vs_fixed_pct"] = np.where(ref > 0, (out[f"{m}_mean"] - ref) / ref * 100, np.nan)
     order = {"low": 0, "nominal": 1, "high": 2}
     out["_d"] = out["demand"].map(order)
     out["_m"] = out["mode"].map({m: i for i, m in enumerate(MODES)})
@@ -145,7 +147,7 @@ def write_markdown(summary: pd.DataFrame, df: pd.DataFrame) -> None:
     for sc_key, part in summary.groupby("scenario", sort=False):
         lines += [f"## Сеть `{sc_key}`", "",
                   "| Спрос | Режим | Время в пути, с | Ожидание, с | Очередь, авт. | Потери времени, с "
-                  "| 95-й процентиль времени в пути, с | Поездок | Телепорт. |",
+                  "| 95-й процентиль ожидания, с | Поездок | Телепорт. |",
                   "|---|---|---|---|---|---|---|---|---|"]
         for _, r in part.iterrows():
             def cell(m: str, digits: int = 1) -> str:
@@ -157,7 +159,7 @@ def write_markdown(summary: pd.DataFrame, df: pd.DataFrame) -> None:
             name = f"**{name}**" if r["mode"] == "rl" else name
             lines.append(f"| {LEVEL_NAMES.get(r['demand'], r['demand'])} | {name} | {cell('avg_travel_time')} "
                          f"| {cell('avg_waiting_time')} | {cell('avg_queue_length', 2)} | {cell('avg_time_loss')} "
-                         f"| {cell('p95_travel_time')} | {r['throughput_mean']:.0f} | {r['teleports_mean']:.1f} |")
+                         f"| {cell('p95_waiting_time')} | {r['throughput_mean']:.0f} | {r['teleports_mean']:.1f} |")
         lines.append("")
     # Краткий вывод по номинальному спросу
     lines += ["## Итог при номинальном спросе", ""]
@@ -172,6 +174,10 @@ def write_markdown(summary: pd.DataFrame, df: pd.DataFrame) -> None:
             f"{-p.loc['actuated', 'avg_waiting_time_vs_fixed_pct']:.1f}%); "
             f"средняя очередь {p.loc['fixed', 'avg_queue_length_mean']:.2f} → "
             f"{p.loc['rl', 'avg_queue_length_mean']:.2f} авт.")
+    rl = summary[summary["mode"] == "rl"]
+    lines += ["", "Защитное правило максимального ожидания (90 с) скорректировало решения RL-агентов: "
+              + "; ".join(f"`{r['scenario']}` / {LEVEL_NAMES.get(r['demand'], r['demand'])} — "
+                          f"{100 * r['guard_rate_mean']:.3f}%" for _, r in rl.iterrows()) + "."]
     # Обучение
     lines += ["", "## Обучение", "", "| Сеть | Агентов | Эпизодов | Лучший эпизод | Время обучения, мин |",
               "|---|---|---|---|---|"]
@@ -192,10 +198,15 @@ def write_markdown(summary: pd.DataFrame, df: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 # Графики
 # ---------------------------------------------------------------------------
-def _legend(fig, modes=MODES, y=1.0):
+def _layout_with_legend(fig, title: str | None = None, modes=MODES) -> None:
+    """Заголовок и легенда — отдельной полосой над графиками, без наложений."""
+    band = (0.75 if title else 0.45) / fig.get_figheight()  # высота полосы: дюймы -> доля фигуры
+    fig.tight_layout(rect=(0, 0, 1, 1 - band))
     handles = [plt.Line2D([], [], color=COLORS[m], lw=6, solid_capstyle="butt") for m in modes]
-    fig.legend(handles, [MODE_NAMES[m] for m in modes], loc="upper center", ncol=len(modes),
-               bbox_to_anchor=(0.5, y), fontsize=10, labelcolor=INK2, handlelength=1.2)
+    fig.legend(handles, [MODE_NAMES[m] for m in modes], loc="lower left", ncol=len(modes),
+               bbox_to_anchor=(0.0, 1 - band + 0.02 / fig.get_figheight()), fontsize=10, labelcolor=INK2, handlelength=1.2)
+    if title:
+        fig.text(0.01, 0.995, title, ha="left", va="top", fontsize=12, fontweight="bold", color=INK)
 
 
 def plot_metrics_nominal(summary: pd.DataFrame) -> None:
@@ -221,10 +232,7 @@ def plot_metrics_nominal(summary: pd.DataFrame) -> None:
         ax.tick_params(axis="x", length=0)
         title, unit = METRICS[m]
         ax.set_title(f"{title}, {unit}")
-    _legend(fig, y=1.02)
-    fig.suptitle("Номинальный спрос: меньше — лучше", x=0.01, y=1.10, ha="left", fontsize=12,
-                 fontweight="semibold", color=INK)
-    fig.tight_layout()
+    _layout_with_legend(fig, "Номинальный спрос: меньше — лучше")
     fig.savefig(REPORTS / "fig_metrics_nominal.png", dpi=160, bbox_inches="tight")
     plt.close(fig)
 
@@ -251,8 +259,7 @@ def plot_demand_levels(summary: pd.DataFrame) -> None:
             ax.tick_params(axis="x", length=0)
             title, unit = METRICS[m]
             ax.set_title(f"{s.replace('grid', 'Решётка ')}: {title.lower()}, {unit}")
-    _legend(fig, y=1.03)
-    fig.tight_layout()
+    _layout_with_legend(fig, "Метрики при разном уровне спроса: меньше — лучше")
     fig.savefig(REPORTS / "fig_demand_levels.png", dpi=160, bbox_inches="tight")
     plt.close(fig)
 
@@ -275,9 +282,9 @@ def plot_queue_timeseries(details: pd.DataFrame) -> None:
                 color=MUTED, va="top")
         ax.set_xlabel("время симуляции, мин")
         ax.set_ylim(bottom=0)
-        ax.set_title(f"{s.replace('grid', 'Решётка ')}: стоящие ТС на подходах ко всем светофорам")
-    _legend(fig, y=1.04)
-    fig.tight_layout()
+        ax.set_title(f"{s.replace('grid', 'Решётка ')}: стоящие ТС на подходах, авт.")
+    _layout_with_legend(fig, "Суммарная очередь в сети во времени (номинальный спрос, "
+                             "скользящее среднее 2.5 мин)")
     fig.savefig(REPORTS / "fig_queue_timeseries.png", dpi=160, bbox_inches="tight")
     plt.close(fig)
 
@@ -303,6 +310,9 @@ def plot_training(scenarios: list[str]) -> None:
                 ax.text(log["episode"].max(), v, f" {MODE_NAMES[mode]}", va="bottom", ha="right",
                         fontsize=8, color=INK2)
         ax.set_yscale("log")
+        ticks = [t for t in (0.5, 1, 2, 3, 5, 10, 20, 30, 50) if t <= max(log["train_avg_queue"].max(), 1) * 1.2]
+        ax.set_yticks(ticks, [f"{t:g}" for t in ticks])
+        ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
         ax.set_xlabel("эпизод обучения")
         ax.set_title(f"{s.replace('grid', 'Решётка ')}: средняя очередь на перекрёсток, авт. (лог. шкала)")
         ax.text(0.99, 0.97, "светлая линия — обучение (с исследованием ε)\nточки — валидация (ε = 0)",
@@ -339,8 +349,8 @@ def plot_tls_maps(details: pd.DataFrame) -> None:
             ax.axis("off")
             ax.set_title(MODE_NAMES[mode])
         fig.colorbar(sca, ax=axes, shrink=0.7, label="средняя очередь, авт.")
-        fig.suptitle(f"{s}: средняя очередь на каждом перекрёстке (номинальный спрос)", x=0.01, ha="left",
-                     fontsize=12, fontweight="semibold", color=INK)
+        fig.suptitle(f"{s.replace('grid', 'Решётка ')}: средняя очередь на каждом перекрёстке, авт. (номинальный спрос)", x=0.01, ha="left",
+                     fontsize=12, fontweight="bold", color=INK)
         fig.savefig(REPORTS / f"fig_tls_map_{s}.png", dpi=160, bbox_inches="tight")
         plt.close(fig)
 

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from agents import config  # noqa: E402
 from agents.dqn import IndependentDQN  # noqa: E402
-from agents.env import ApproachObservation, make_env  # noqa: E402
+from agents.env import ApproachObservation, MaxWaitGuard, make_env  # noqa: E402
 from agents.evaluate import evaluate, run_episode  # noqa: E402
 from agents.networks import get_scenario  # noqa: E402
 
@@ -67,6 +67,22 @@ def test_observation(grid2x2):
         env.close()
 
 
+def test_max_wait_guard(grid2x2):
+    """Если «агент» держит одну фазу бесконечно, правило обязано переключить её."""
+    env = make_env(grid2x2, grid2x2.eval_route("nominal", config.EVAL_SEEDS[0]), "rl", seed=1)
+    try:
+        obs = env.reset()
+        guard = MaxWaitGuard(env, max_wait=60)
+        for _ in range(60):  # 5 минут «вечного» зелёного фазе 0
+            obs, _, _, _ = env.step(guard({ts: 0 for ts in obs}))
+        assert guard.interventions > 0
+        assert 0 < guard.rate < 1
+        # отключённое правило (max_wait=None) действия не меняет
+        assert MaxWaitGuard(env, max_wait=None)({"A0": 0}) == {"A0": 0}
+    finally:
+        env.close()
+
+
 def test_independent_dqn_save_load(tmp_path, grid2x2):
     from gymnasium import spaces
 
@@ -90,7 +106,8 @@ def test_independent_dqn_save_load(tmp_path, grid2x2):
 
 def test_evaluate_fixed_contract(grid2x2):
     res = evaluate("grid2x2", "fixed", seeds=[config.EVAL_SEEDS[0]])
-    for key in ("avg_travel_time", "avg_waiting_time", "avg_queue_length", "throughput", "per_tls"):
+    for key in ("avg_travel_time", "avg_waiting_time", "avg_queue_length", "p95_waiting_time",
+                "throughput", "per_tls", "guard_rate"):
         assert key in res
     assert res["avg_travel_time"] > 0 and res["throughput"] > 0
     assert set(res["per_tls"]) == {"A0", "A1", "B0", "B1"}

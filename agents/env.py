@@ -139,6 +139,82 @@ class ApproachObservation(ObservationFunction):
 
 
 # ---------------------------------------------------------------------------
+# Защитное правило максимального ожидания
+# ---------------------------------------------------------------------------
+class MaxWaitGuard:
+    """Защитный слой поверх политики агента («максимальный красный»).
+
+    Если какая-то машина на подходе стоит дольше ``max_wait`` секунд, а
+    выбранная агентом фаза эту полосу не обслуживает, действие заменяется
+    на фазу, дающую этой полосе зелёный (предпочтительно главный «G»,
+    а не «g» с уступанием). Так делают и в реальных адаптивных системах:
+    обучаемая логика работает внутри жёстких ограничений безопасности и
+    справедливости.
+
+    Зачем: при обучении на награде «минус очередь» выгода от переключения
+    ради ОДНОЙ машины мала (0.1 за шаг) и тонет в ошибке аппроксимации
+    Q-сети, поэтому в редких состояниях (почти пустая сеть) агент мог
+    держать зелёный пустому направлению минутами. Правило срабатывает
+    редко; число срабатываний выводится в метриках (``guard_rate``).
+    """
+
+    def __init__(self, env, max_wait: float | None = config.MAX_WAIT_GUARD_S):
+        self.env = env
+        self.max_wait = max_wait
+        self.decisions = 0
+        self.interventions = 0
+        self._serving: dict[str, dict[str, tuple[list[int], list[int]]]] = {}
+
+    def _serving_map(self, ts) -> dict[str, tuple[list[int], list[int]]]:
+        """Полоса -> (фазы с «G», фазы с «g»), индексы зелёных фаз sumo-rl."""
+        if ts.id not in self._serving:
+            links = ts.sumo.trafficlight.getControlledLinks(ts.id)
+            serving: dict[str, tuple[list[int], list[int]]] = {}
+            for i, phase in enumerate(ts.green_phases):
+                for li, conns in enumerate(links):
+                    if li >= len(phase.state) or phase.state[li] not in "Gg":
+                        continue
+                    for conn in conns:
+                        major, minor = serving.setdefault(conn[0], ([], []))
+                        target = major if phase.state[li] == "G" else minor
+                        if i not in target:
+                            target.append(i)
+            self._serving[ts.id] = serving
+        return self._serving[ts.id]
+
+    def __call__(self, actions: dict[str, int]) -> dict[str, int]:
+        if not self.max_wait:
+            return actions
+        out = dict(actions)
+        for ts_id, action in actions.items():
+            ts = self.env.traffic_signals[ts_id]
+            self.decisions += 1
+            if ts.time_since_last_phase_change < ts.min_green + ts.yellow_time:
+                continue  # переключиться всё равно нельзя
+            sumo = ts.sumo
+            worst_lane, worst = None, self.max_wait
+            for lane in ts.lanes:
+                # сумма ожиданий на полосе >= ожидания любой машины — дешёвый фильтр
+                if sumo.lane.getWaitingTime(lane) <= self.max_wait:
+                    continue
+                w = max((sumo.vehicle.getWaitingTime(v) for v in sumo.lane.getLastStepVehicleIDs(lane)), default=0.0)
+                if w > worst:
+                    worst_lane, worst = lane, w
+            if worst_lane is None:
+                continue
+            major, minor = self._serving_map(ts).get(worst_lane, ([], []))
+            good = major or minor
+            if good and action not in good:
+                out[ts_id] = good[0]
+                self.interventions += 1
+        return out
+
+    @property
+    def rate(self) -> float:
+        return self.interventions / self.decisions if self.decisions else 0.0
+
+
+# ---------------------------------------------------------------------------
 # Награда
 # ---------------------------------------------------------------------------
 def queue_reward(ts) -> float:

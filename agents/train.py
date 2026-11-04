@@ -12,7 +12,9 @@
    на разных нагрузках, а не запоминает один сценарий.
 3. Все агенты действуют одновременно в одной симуляции; каждый хранит
    свой опыт и обучает свою сеть (см. agents/dqn.py).
-4. Каждые VALIDATE_EVERY эпизодов — проверка без исследования (ε = 0) на
+4. Поверх политики действует защитное правило максимального ожидания
+   (env.MaxWaitGuard, 90 с) — и при обучении, и при оценке.
+5. Каждые VALIDATE_EVERY эпизодов — проверка без исследования (ε = 0) на
    отдельном валидационном спросе (семя 50, не совпадает ни с обучающими,
    ни с тестовыми). Сохраняется лучший по средней очереди набор моделей.
 
@@ -35,7 +37,7 @@ from agents import config  # noqa: E402
 import numpy as np  # noqa: E402
 
 from agents.dqn import IndependentDQN  # noqa: E402
-from agents.env import make_env  # noqa: E402
+from agents.env import MaxWaitGuard, make_env  # noqa: E402
 from agents.evaluate import run_episode  # noqa: E402
 from agents.networks import default_scenarios, get_scenario  # noqa: E402
 
@@ -75,8 +77,10 @@ def train(spec: str, episodes: int = config.TRAIN_EPISODES, seed: int = 0,
             obs_layout = {ts: env.traffic_signals[ts].observation_fn.layout() for ts in env.ts_ids}
         rewards_sum, losses, done = 0.0, [], False
         eps_start = agents.epsilon()
+        guard = MaxWaitGuard(env)
         while not done:
-            actions = agents.act(obs, deterministic=False)
+            # в буфер опыта попадает действие, которое реально выполнено
+            actions = guard(agents.act(obs, deterministic=False))
             next_obs, rewards, dones, _ = env.step(actions)
             done = dones["__all__"]
             losses += agents.observe(obs, actions, rewards, next_obs, done)
@@ -91,13 +95,15 @@ def train(spec: str, episodes: int = config.TRAIN_EPISODES, seed: int = 0,
             "train_avg_queue": round(-rewards_sum / config.REWARD_SCALE / steps_per_episode / n_tls, 3),
             "train_reward": round(rewards_sum, 2),
             "loss": round(float(np.mean(losses)), 5) if losses else None,
+            "guard_rate": round(guard.rate, 4),
             "episode_time_s": round(time.time() - t0, 1),
         }
         if ep % validate_every == 0 or ep == episodes:
             val = run_episode(sc, val_route, "rl", seed=config.VALIDATION_SEED, agents=agents)
             row.update({"val_avg_queue": round(val["avg_queue_length"], 3),
                         "val_avg_waiting_time": round(val["avg_waiting_time"], 2),
-                        "val_avg_travel_time": round(val["avg_travel_time"], 2)})
+                        "val_avg_travel_time": round(val["avg_travel_time"], 2),
+                        "val_guard_rate": round(val["guard_rate"], 4)})
             if val["avg_queue_length"] < best["avg_queue_length"]:
                 best = {"avg_queue_length": val["avg_queue_length"], "episode": ep,
                         "avg_waiting_time": val["avg_waiting_time"], "avg_travel_time": val["avg_travel_time"]}
@@ -110,6 +116,7 @@ def train(spec: str, episodes: int = config.TRAIN_EPISODES, seed: int = 0,
                                                 ("avg_queue_length", "avg_waiting_time", "avg_travel_time")}
                                             for m in baseline},
                     "env_params": config.ENV_PARAMS, "reward_scale": config.REWARD_SCALE,
+                    "max_wait_guard_s": config.MAX_WAIT_GUARD_S,
                     "dqn_params": {k: v for k, v in config.DQN_PARAMS.items()},
                     "observation_layout": obs_layout,
                 })
@@ -121,8 +128,9 @@ def train(spec: str, episodes: int = config.TRAIN_EPISODES, seed: int = 0,
               f"  loss {row['loss']}  {row['episode_time_s']:.0f} с{val_txt}", flush=True)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    fields = ["episode", "route_seed", "epsilon", "train_avg_queue", "train_reward", "loss",
-              "val_avg_queue", "val_avg_waiting_time", "val_avg_travel_time", "saved", "episode_time_s"]
+    fields = ["episode", "route_seed", "epsilon", "train_avg_queue", "train_reward", "loss", "guard_rate",
+              "val_avg_queue", "val_avg_waiting_time", "val_avg_travel_time", "val_guard_rate", "saved",
+              "episode_time_s"]
     with open(out_dir / "training_log.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()

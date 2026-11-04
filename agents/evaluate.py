@@ -17,9 +17,13 @@
   движения, с;
 * ``avg_depart_delay`` — средняя задержка въезда в сеть (очередь «за
   границей» района), с;
+* ``p95_waiting_time`` — 95-й процентиль времени ожидания ТС, с (мера
+  «справедливости»: не ждут ли отдельные направления слишком долго);
 * ``throughput`` — число завершённых поездок; ``teleports`` — число
   «телепортаций» застрявших ТС (признак затора).
 
+``guard_rate`` — доля решений RL-агентов, скорректированных защитным
+правилом максимального ожидания (env.MaxWaitGuard), для fixed/actuated 0;
 ``per_tls`` — средняя очередь по каждому светофору (для карты),
 ``runs`` — метрики каждого прогона, ``std`` — стандартные отклонения.
 
@@ -44,12 +48,13 @@ from agents import config  # noqa: E402
 
 import numpy as np  # noqa: E402
 
-from agents.env import MODES, make_env  # noqa: E402
+from agents.env import MODES, MaxWaitGuard, make_env  # noqa: E402
 from agents.networks import Scenario, get_scenario  # noqa: E402
 
 METRIC_KEYS = ("avg_travel_time", "avg_waiting_time", "avg_queue_length", "avg_time_loss",
-               "avg_depart_delay", "throughput", "teleports", "vehicles")
+               "avg_depart_delay", "p95_waiting_time", "throughput", "teleports", "vehicles")
 UNITS = {"avg_travel_time": "s", "avg_waiting_time": "s", "avg_queue_length": "veh",
+         "p95_waiting_time": "s",
          "avg_time_loss": "s", "avg_depart_delay": "s", "throughput": "veh",
          "teleports": "veh", "vehicles": "veh"}
 
@@ -67,6 +72,8 @@ def _parse_outputs(tripinfo: Path, statistics: Path) -> dict:
         "avg_waiting_time": mean("waitingTime"),
         "avg_time_loss": mean("timeLoss"),
         "avg_depart_delay": mean("departDelay"),
+        "p95_waiting_time": float(np.percentile([float(t.get("waitingTime")) for t in trips], 95))
+        if trips else 0.0,
         "throughput": sum(1 for t in trips if float(t.get("arrival")) >= 0),
         "teleports": int(stats.find("teleports").get("total")),
         "vehicles": int(vehicles["loaded"]),
@@ -90,6 +97,7 @@ def run_episode(sc: Scenario, route_file: Path, mode: str, seed: int = 0, agents
         t0 = time.time()
         try:
             obs = env.reset()
+            guard = MaxWaitGuard(env)
             if mode == "rl":
                 agents.check_compatible(env)
             ts_ids = list(env.ts_ids)
@@ -98,7 +106,7 @@ def run_episode(sc: Scenario, route_file: Path, mode: str, seed: int = 0, agents
             steps = 0
             done = False
             while not done:
-                actions = agents.act(obs, deterministic=True) if mode == "rl" else {}
+                actions = guard(agents.act(obs, deterministic=True)) if mode == "rl" else {}
                 obs, _, dones, _ = env.step(actions)
                 done = dones["__all__"]
                 q = {ts: env.traffic_signals[ts].get_total_queued() for ts in ts_ids}
@@ -114,6 +122,7 @@ def run_episode(sc: Scenario, route_file: Path, mode: str, seed: int = 0, agents
     res.update({
         "avg_queue_length": float(np.mean(list(per_tls.values()))) if per_tls else 0.0,
         "per_tls_queue": per_tls,
+        "guard_rate": guard.rate,  # доля решений RL, скорректированных защитным правилом
         "wall_time": time.time() - t0,
     })
     if keep_series:
@@ -159,7 +168,8 @@ def evaluate(network_path: str | Path, mode: str, *, demand: str = "nominal",
     tls = runs[0]["per_tls_queue"].keys() if runs else []
     result["per_tls"] = {ts: {"avg_queue_length": float(np.mean([r["per_tls_queue"][ts] for r in runs]))}
                          for ts in tls}
-    result["runs"] = [{k: r[k] for k in (*METRIC_KEYS, "route_file", "wall_time")} for r in runs]
+    result["guard_rate"] = float(np.mean([r["guard_rate"] for r in runs])) if runs else 0.0
+    result["runs"] = [{k: r[k] for k in (*METRIC_KEYS, "guard_rate", "route_file", "wall_time")} for r in runs]
     return result
 
 
