@@ -1,0 +1,11 @@
+# Все зависимости Python, чтобы запустить систему целиком (Python 3.11):
+# sim/ (SUMO, датасет), ml/ (GNN), agents/ (RL), backend/ (FastAPI).
+# Совместимость версий проверена (pip check / uv pip check — без конфликтов).
+#
+# PyTorch без CUDA скачивается в ~15 раз меньше — поставьте его первым:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+-r sim/requirements.txt
+-r ml/requirements.txt
+-r agents/requirements.txt
+-r backend/requirements.txt
