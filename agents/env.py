@@ -267,14 +267,18 @@ class TrafficEnv(SumoEnvironment):
 
 def make_env(sc: Scenario, route_file: Path, mode: str = "rl", seed: int = 0,
              extra_args: list[str] | None = None, use_gui: bool = False,
-             num_seconds: int | None = None) -> TrafficEnv:
+             num_seconds: int | None = None, env_params: dict | None = None) -> TrafficEnv:
     """Создаёт многоагентную среду sumo-rl для сценария.
 
     mode:
       * ``rl`` — фазами управляют агенты (действия из step());
       * ``fixed`` — исходная статическая программа сети, действия игнорируются;
       * ``actuated`` — то же, но с actuated-программой из tls_actuated.add.xml.
+
+    env_params — переопределение config.ENV_PARAMS (например, параметры, с
+    которыми обучалась модель: они хранятся в её meta.json).
     """
+    ep = {**config.ENV_PARAMS, **(env_params or {})}
     if mode not in MODES:
         raise ValueError(f"mode должен быть одним из {MODES}, получено: {mode!r}")
     args = list(extra_args or [])
@@ -285,11 +289,11 @@ def make_env(sc: Scenario, route_file: Path, mode: str = "rl", seed: int = 0,
         route_file=str(route_file),
         use_gui=use_gui,
         num_seconds=num_seconds or config.EPISODE_SECONDS,
-        delta_time=config.ENV_PARAMS["delta_time"],
-        yellow_time=config.ENV_PARAMS["yellow_time"],
-        min_green=config.ENV_PARAMS["min_green"],
-        max_green=config.ENV_PARAMS["max_green"],
-        time_to_teleport=config.ENV_PARAMS["time_to_teleport"],
+        delta_time=ep["delta_time"],
+        yellow_time=ep["yellow_time"],
+        min_green=ep["min_green"],
+        max_green=ep["max_green"],
+        time_to_teleport=ep["time_to_teleport"],
         reward_fn=queue_reward,
         observation_class=ApproachObservation,
         add_system_info=False,

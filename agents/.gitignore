@@ -8,3 +8,4 @@ networks/*
 # Сгенерированные маршруты (десятки МБ) — воспроизводятся по семенам:
 # python -m agents.networks
 networks/*/routes/
+models/_ablation/

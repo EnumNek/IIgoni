@@ -148,9 +148,22 @@ def main() -> None:
     ap.add_argument("--episodes", type=int, default=config.TRAIN_EPISODES)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--validate-every", type=int, default=config.VALIDATE_EVERY)
+    # Для экспериментов (абляции): параметры записываются в meta.json модели
+    # и автоматически применяются при её оценке.
+    ap.add_argument("--min-green", type=int, default=None, help="минимальный зелёный, с (по умолчанию 5)")
+    ap.add_argument("--gamma", type=float, default=None, help="коэффициент дисконтирования DQN (по умолчанию 0.95)")
+    ap.add_argument("--out-dir", default=None, help="куда сохранить модели (по умолчанию agents/models/<сеть>)")
     args = ap.parse_args()
-    for spec in args.scenario or default_scenarios():
-        train(spec, episodes=args.episodes, seed=args.seed, validate_every=args.validate_every)
+    if args.min_green is not None:
+        config.ENV_PARAMS["min_green"] = args.min_green
+    if args.gamma is not None:
+        config.DQN_PARAMS["gamma"] = args.gamma
+    specs = args.scenario or default_scenarios()
+    if args.out_dir and len(specs) > 1:
+        ap.error("--out-dir можно указать только для одной сети")
+    for spec in specs:
+        train(spec, episodes=args.episodes, seed=args.seed, validate_every=args.validate_every,
+              out_dir=Path(args.out_dir) if args.out_dir else None)
 
 
 if __name__ == "__main__":

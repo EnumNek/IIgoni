@@ -127,3 +127,13 @@ def test_evaluate_rl(grid2x2):
     res = evaluate(grid2x2.network_json, "rl", seeds=[config.EVAL_SEEDS[0]])
     assert res["mode"] == "rl" and res["avg_travel_time"] > 0
     assert res["teleports"] == 0
+
+
+def test_env_params_override(grid2x2):
+    """Параметры среды модели (из meta.json) переопределяют config.ENV_PARAMS."""
+    env = make_env(grid2x2, grid2x2.eval_route("nominal", config.EVAL_SEEDS[0]), "rl", seed=1,
+                   env_params={"min_green": 10})
+    try:
+        assert env.min_green == 10 and env.delta_time == config.ENV_PARAMS["delta_time"]
+    finally:
+        env.close()

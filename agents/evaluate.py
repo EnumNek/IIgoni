@@ -93,7 +93,10 @@ def run_episode(sc: Scenario, route_file: Path, mode: str, seed: int = 0, agents
         tripinfo, stats = Path(tmp) / "tripinfo.xml", Path(tmp) / "stats.xml"
         extra = ["--tripinfo-output", str(tripinfo), "--tripinfo-output.write-unfinished", "true",
                  "--statistic-output", str(stats)]
-        env = make_env(sc, route_file, mode, seed=seed, extra_args=extra, use_gui=use_gui)
+        # RL: среда с теми же параметрами (min_green и т. п.), что при обучении
+        env_params = agents.meta.get("env_params") if mode == "rl" else None
+        env = make_env(sc, route_file, mode, seed=seed, extra_args=extra, use_gui=use_gui,
+                       env_params=env_params)
         t0 = time.time()
         try:
             obs = env.reset()
@@ -132,14 +135,16 @@ def run_episode(sc: Scenario, route_file: Path, mode: str, seed: int = 0, agents
 
 def evaluate(network_path: str | Path, mode: str, *, demand: str = "nominal",
              seeds: tuple[int, ...] | list[int] | None = None,
-             route_files: list[str | Path] | None = None) -> dict:
+             route_files: list[str | Path] | None = None,
+             models_dir: str | Path | None = None) -> dict:
     """Метрики режима управления светофорами на сети (контракт agents/).
 
     network_path — ``grid2x2``/``grid4x4``/``sim``, путь к .net.xml или к
     network.json (формат контракта). mode — ``fixed`` | ``actuated`` | ``rl``.
     demand — ``low`` | ``nominal`` | ``high``; seeds — семена спроса
     (по умолчанию config.EVAL_SEEDS); route_files — свои файлы маршрутов
-    SUMO вместо сгенерированных.
+    SUMO вместо сгенерированных; models_dir — другая папка моделей
+    (по умолчанию agents/models/<сеть>/).
     """
     if mode not in MODES:
         raise ValueError(f"mode должен быть одним из {MODES}, получено: {mode!r}")
@@ -150,7 +155,7 @@ def evaluate(network_path: str | Path, mode: str, *, demand: str = "nominal",
     if mode == "rl":
         from agents.dqn import IndependentDQN
 
-        agents = IndependentDQN.load(sc.models_dir)
+        agents = IndependentDQN.load(Path(models_dir) if models_dir else sc.models_dir)
 
     runs = []
     for i, route in enumerate(routes):
@@ -179,8 +184,9 @@ def main() -> None:
     ap.add_argument("--mode", default="rl", choices=MODES)
     ap.add_argument("--demand", default="nominal", choices=list(config.EVAL_DEMAND_LEVELS))
     ap.add_argument("--seeds", type=int, nargs="+", default=None)
+    ap.add_argument("--models-dir", default=None, help="папка моделей (по умолчанию agents/models/<сеть>)")
     args = ap.parse_args()
-    res = evaluate(args.network, args.mode, demand=args.demand, seeds=args.seeds)
+    res = evaluate(args.network, args.mode, demand=args.demand, seeds=args.seeds, models_dir=args.models_dir)
     res.pop("per_tls")
     print(json.dumps(res, ensure_ascii=False, indent=2))
 
