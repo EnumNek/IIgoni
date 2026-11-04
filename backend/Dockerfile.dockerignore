@@ -1,0 +1,8 @@
+# Контекст сборки — корень репозитория; в образ берём только нужное
+*
+!backend
+!ml/requirements.txt
+!agents/requirements.txt
+backend/data
+backend/.pytest_cache
+backend/**/__pycache__

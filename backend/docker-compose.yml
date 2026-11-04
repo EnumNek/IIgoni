@@ -1,0 +1,54 @@
+# Запуск всей системы: cd backend && docker compose up --build
+#   http://localhost:8080        — веб-приложение (nginx + собранный React)
+#   http://localhost:8000/docs   — Swagger UI бэкенда
+name: iigoni
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: transport
+      POSTGRES_USER: transport
+      POSTGRES_PASSWORD: transport
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transport -d transport"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      args:
+        WITH_ML: ${WITH_ML:-0}
+    environment:
+      DATABASE_URL: postgresql+psycopg://transport:transport@db:5432/transport
+      # Репозиторий смонтирован только для чтения: sim/data/network.json, map.osm, ml/, agents/
+      REPO_ROOT: /repo
+      STUB_NETWORK_PATH: /data/network_stub.json
+      WORK_DIR: /data/work
+      INTEGRATION_MODE: ${INTEGRATION_MODE:-auto}
+    volumes:
+      - ..:/repo:ro
+      - backend-data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ../frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  backend-data:
