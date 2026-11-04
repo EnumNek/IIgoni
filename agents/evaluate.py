@@ -56,7 +56,7 @@ METRIC_KEYS = ("avg_travel_time", "avg_waiting_time", "avg_queue_length", "avg_t
 UNITS = {"avg_travel_time": "s", "avg_waiting_time": "s", "avg_queue_length": "veh",
          "p95_waiting_time": "s",
          "avg_time_loss": "s", "avg_depart_delay": "s", "throughput": "veh",
-         "teleports": "veh", "vehicles": "veh"}
+         "teleports": "veh", "vehicles": "veh", "guard_rate": "share"}
 
 
 def _parse_outputs(tripinfo: Path, statistics: Path) -> dict:

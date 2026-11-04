@@ -246,16 +246,23 @@ def plot_demand_levels(summary: pd.DataFrame) -> None:
     for i, m in enumerate(metrics):
         for j, s in enumerate(scenarios):
             ax = axes[i][j]
+            ends = []
             for mode in MODES:
                 part = summary[(summary.scenario == s) & (summary["mode"] == mode)].set_index("demand").loc[levels]
                 y = part[f"{m}_mean"].values
                 ax.plot(range(len(levels)), y, color=COLORS[mode], marker="o", ms=6,
                         mec=SURFACE, mew=2, zorder=3)
-                ax.annotate(f"{y[-1]:.0f}", (len(levels) - 1, y[-1]), xytext=(8, 0), textcoords="offset points",
-                            va="center", fontsize=8, color=INK2)
+                ends.append(y[-1])
             ax.set_xticks(range(len(levels)), [LEVEL_NAMES[lv] for lv in levels])
             ax.set_xlim(-0.2, len(levels) - 0.6)
             ax.set_ylim(bottom=0)
+            # подписи концов линий — только если они не слипаются (иначе
+            # значения несут легенда и таблица summary.md)
+            span = ax.get_ylim()[1] - ax.get_ylim()[0]
+            for k, v in enumerate(ends):
+                if all(abs(v - w) > 0.05 * span for n, w in enumerate(ends) if n != k):
+                    ax.annotate(f"{v:.0f}", (len(levels) - 1, v), xytext=(8, 0), textcoords="offset points",
+                                va="center", fontsize=8, color=INK2)
             ax.tick_params(axis="x", length=0)
             title, unit = METRICS[m]
             ax.set_title(f"{s.replace('grid', 'Решётка ')}: {title.lower()}, {unit}")
@@ -314,8 +321,8 @@ def plot_training(scenarios: list[str]) -> None:
         ax.set_yticks(ticks, [f"{t:g}" for t in ticks])
         ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
         ax.set_xlabel("эпизод обучения")
-        ax.set_title(f"{s.replace('grid', 'Решётка ')}: средняя очередь на перекрёсток, авт. (лог. шкала)")
-        ax.text(0.99, 0.97, "светлая линия — обучение (с исследованием ε)\nточки — валидация (ε = 0)",
+        ax.set_title(f"{s.replace('grid', 'Решётка ')}: средняя очередь на перекрёсток, авт.")
+        ax.text(0.99, 0.97, "светлая линия — обучение (с исследованием ε)\nточки — валидация (ε = 0); лог. шкала",
                 transform=ax.transAxes, ha="right", va="top", fontsize=8, color=MUTED)
     fig.tight_layout()
     fig.savefig(REPORTS / "fig_training.png", dpi=160, bbox_inches="tight")
@@ -339,7 +346,7 @@ def plot_tls_maps(details: pd.DataFrame) -> None:
             if pts:
                 (xy, vals) = zip(*pts)
                 xs, ys = zip(*xy)
-                sca = ax.scatter(xs, ys, c=vals, cmap="Blues", vmin=0, vmax=vmax, s=260,
+                sca = ax.scatter(xs, ys, c=vals, cmap="Blues", vmin=0, vmax=vmax, s=340,
                                  edgecolors=SURFACE, linewidths=2, zorder=3)
                 if len(pts) <= 25:
                     for x, y, v in zip(xs, ys, vals):
