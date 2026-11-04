@@ -73,7 +73,7 @@ def fig_timing(scen: pd.DataFrame, out_dir: Path) -> str:
     ax.set_ylabel("сценариев")
     ax = axes[1]
     ax.scatter(ok.net_veh_hours, ok.sumo_seconds, s=14, color=BLUE, alpha=0.75, linewidths=0)
-    ax.set_title("Время SUMO растёт с объёмом движения")
+    ax.set_title("Время SUMO и объём движения в сети")
     ax.set_xlabel("машино-часы в сети за прогон")
     ax.set_ylabel("время SUMO, с")
     return _save(fig, out_dir, "fig_time_per_scenario.png")
@@ -384,16 +384,24 @@ def build_report(dataset: Path, out_dir: Path) -> dict:
     wall = meta.get("wall_seconds_this_run") or float("nan")
     n_run = meta.get("scenarios_this_run") or len(scen)
     workers = meta.get("workers") or 1
-    per_core = float(scen[scen.status == "ok"].total_seconds.sum()) / max(wall, 1e-9) if wall == wall else float("nan")
+    # Эталон однопоточного времени — базовый прогон, выполненный отдельно (generate_traffic),
+    # без конкуренции с другими процессами. Время сценариев в датасете измерено при
+    # параллельной работе и поэтому для оценки ускорения не годится.
+    solo_path = config.BASELINE_DIR / "summary.json"
+    solo = json.loads(solo_path.read_text(encoding="utf-8"))["sumo_seconds"] if solo_path.exists() else float("nan")
+    solo_scenario = solo + float(ok.netconvert_seconds.mean())
+    speedup = solo_scenario * n_run / wall if wall == wall else float("nan")
     timing = {
         "per_scenario_seconds": _q(t, (0.0, 0.5, 0.95, 1.0)),
         "netconvert_seconds_mean": float(ok.netconvert_seconds.mean()),
         "sumo_seconds_mean": float(ok.sumo_seconds.mean()),
-        "baseline_sumo_seconds": float(base.sumo_seconds),
+        "baseline_sumo_seconds_parallel": float(base.sumo_seconds),
+        "baseline_sumo_seconds_solo": solo,
+        "contention_slowdown": float(t.mean()) / solo_scenario if solo == solo else None,
         "wall_seconds": wall, "scenarios_in_run": n_run, "workers": workers,
         "throughput_scenarios_per_hour": n_run / wall * 3600 if wall == wall else None,
-        "parallel_speedup": per_core,
-        "parallel_efficiency": per_core / workers if workers else None,
+        "parallel_speedup": speedup,
+        "parallel_efficiency": speedup / workers if workers else None,
     }
     metrics = {m: _q(open_edges[m]) for m in ("occupancy", "mean_speed", "travel_time")}
     d_loss = (ok.net_time_loss_h / base.net_time_loss_h - 1) * 100
@@ -432,7 +440,7 @@ def render_markdown(s: dict, meta: dict, network: dict, figs: dict, effects: pd.
           f"Сгенерировано `python -m sim.report` по датасету от {meta['created_at']} ({meta['sumo_version']}).", ""]
     L += ["## 1. Что смоделировано", "",
           "| Параметр | Значение |", "|---|---|",
-          f"| Источник сети | {nm['source']} (`{nm.get('osm_file', '—')}`), обрезка по границам выгрузки: {nm.get('cropped', False)} |",
+          f"| Источник сети | {nm['source']} (`{nm.get('osm_file', '—')}`), обрезка по границам выгрузки: {'да' if nm.get('cropped') else 'нет'} |",
           f"| Узлов / рёбер / светофоров | {nm['n_nodes']} / {nm['n_edges']} / {nm['n_traffic_lights']} |",
           f"| Протяжённость (все направления) | {nm['total_length_km']} км |",
           f"| Спрос | {sim['insertion_rate_veh_h']} авт/ч, randomTrips, поездки между перекрёстками |",
@@ -446,18 +454,20 @@ def render_markdown(s: dict, meta: dict, network: dict, figs: dict, effects: pd.
           f"![Карта базовой загрузки]({figs['map']})", ""]
     L += ["## 2. Время счёта", "",
           "| Показатель | Значение |", "|---|---|",
-          f"| Время одного сценария (netconvert + SUMO): медиана | {ps['p50']:.1f} с |",
+          f"| Время одного сценария в датасете (netconvert + SUMO, {tm['workers']} процесса параллельно): медиана | {ps['p50']:.1f} с |",
           f"| — среднее / p95 / максимум | {ps['mean']:.1f} / {ps['p95']:.1f} / {ps['p100']:.1f} с |",
           f"| — из них netconvert / SUMO (в среднем) | {tm['netconvert_seconds_mean']:.2f} / {tm['sumo_seconds_mean']:.1f} с |",
-          f"| Базовый прогон SUMO | {tm['baseline_sumo_seconds']:.1f} с |",
+          f"| Базовый прогон SUMO: один процесс / при параллельной работе | {tm['baseline_sumo_seconds_solo']:.1f} / {tm['baseline_sumo_seconds_parallel']:.1f} с |",
           f"| Параллельно: процессов | {tm['workers']} |",
           f"| Общее время сборки | {tm['wall_seconds'] / 60:.1f} мин на {tm['scenarios_in_run']} сценариев |",
           f"| Производительность | {tm['throughput_scenarios_per_hour']:.0f} сценариев/ч |",
           f"| Ускорение от параллелизма | ×{tm['parallel_speedup']:.2f} (эффективность {tm['parallel_efficiency'] * 100:.0f} %) |",
           "",
-          "Время в таблице измерено при одновременной работе всех процессов, т.е. включает "
-          "конкуренцию за память и кэш; в одиночном режиме сценарий считается немного быстрее "
-          f"(базовый прогон — {tm['baseline_sumo_seconds']:.1f} с). Оценка: 10 000 сценариев на "
+          "Время сценариев в датасете измерено при одновременной работе всех процессов, поэтому включает "
+          "конкуренцию за память и кэш процессора: в одиночку тот же прогон идёт примерно в "
+          f"{tm['contention_slowdown']:.2f} раза быстрее. Ускорение посчитано честно — относительно "
+          "последовательного счёта в одном процессе (время базового прогона в одиночку × число сценариев / "
+          f"общее время). Оценка: 10 000 сценариев на "
           f"{tm['workers']} ядрах ≈ {10000 / tm['throughput_scenarios_per_hour']:.0f} ч, на 32 ядрах ≈ "
           f"{10000 / (tm['throughput_scenarios_per_hour'] / tm['workers'] * 32):.1f} ч (при той же эффективности).", "",
           f"![Время на сценарий]({figs['time']})", ""]
@@ -477,9 +487,19 @@ def render_markdown(s: dict, meta: dict, network: dict, figs: dict, effects: pd.
         L += [f"![Локальный эффект]({figs['effects']})", "",
               "Медианы Δ времени проезда по категориям:", "",
               "| Категория | n | медиана Δ, % | p10, % | p90, % |", "|---|---|---|---|---|"]
-        for cat, g in effects.groupby("category"):
+        order = ["полосы +", "полосы −", "скорость ↑", "скорость ↓", "закрытие",
+                 "светофор: новый", "светофор: выкл.", "светофор: адаптивный"]
+        for cat in [o for o in order if o in set(effects.category)]:
+            g = effects[effects.category == cat]
             L.append(f"| {cat} | {len(g)} | {g.delta_tt.median():+.1f} | {g.delta_tt.quantile(.1):+.1f} | {g.delta_tt.quantile(.9):+.1f} |")
-        L.append("")
+        L += ["",
+              "Для lanes/speed затронутым считается само ребро, для светофора — все въезды в перекрёсток, "
+              "для закрытия — рёбра, ведущие к началу закрытого ребра. Знаки эффектов согласуются с физикой "
+              "движения, это проверка правдоподобия данных: снижение скорости увеличивает время проезда, "
+              "новый светофор с фиксированным циклом добавляет задержку на ранее нерегулируемом перекрёстке, "
+              "адаптивное регулирование её снижает. Добавление полосы в среднем почти ничего не меняет: "
+              "большинство рёбер не перегружено, и полоса помогает только на «узких местах» (длинный левый "
+              "хвост распределения). Модели предстоит выучить именно такую зависимость эффекта от контекста.", ""]
     e = s["effects"]
     L += [f"![Эффект на сеть]({figs['scenario']})", "",
           f"Изменение суммарных потерь времени в сети относительно базы: медиана "
