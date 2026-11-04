@@ -402,6 +402,10 @@ def main(argv=None):
     # (стохастичность симуляции) — ниже этой ошибки прогноз опуститься не может.
     noise = None
     Yb = ds.Y[ds.is_base].astype(np.float64)
+    if len(Yb) < 3 and ds.noise_Y is not None:
+        # В датасете sim/ один базовый прогон (общее зерно у всех сценариев), а разброс
+        # по зёрнам SUMO лежит отдельно — в sim/data/dataset/seed_noise.parquet.
+        Yb = ds.noise_Y.astype(np.float64)
     if len(Yb) >= 3:
         errs = [np.nanmean(np.abs(Yb[i] - np.nanmean(np.delete(Yb, i, 0), 0)), 0) for i in range(len(Yb))]
         noise = dict(zip(TARGETS, np.mean(errs, 0).tolist()))

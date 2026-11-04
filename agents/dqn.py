@@ -148,9 +148,9 @@ class IndependentDQN:
                   for ts, info in meta["agents"].items()}
         return cls(models, meta)
 
-    def check_compatible(self, env) -> None:
-        """Проверяет, что модели подходят к светофорам среды (id, размерности)."""
-        problems = []
+    def compatible(self, env) -> tuple[list[str], list[str]]:
+        """-> (светофоры среды, к которым подходит модель; описание остальных)."""
+        ok, problems = [], []
         for ts in env.ts_ids:
             if ts not in self.models:
                 problems.append(f"нет модели для светофора {ts}")
@@ -161,6 +161,13 @@ class IndependentDQN:
             if m.observation_space.shape[0] != obs_dim or m.action_space.n != n_act:
                 problems.append(f"{ts}: модель ожидает obs={m.observation_space.shape[0]}, "
                                 f"фаз={m.action_space.n}; в сети obs={obs_dim}, фаз={n_act}")
+            else:
+                ok.append(ts)
+        return ok, problems
+
+    def check_compatible(self, env) -> None:
+        """Проверяет, что модели подходят ко всем светофорам среды (id, размерности)."""
+        _, problems = self.compatible(env)
         if problems:
             raise ValueError("Модели не подходят к сети (сеть изменилась — нужно дообучение):\n  "
                              + "\n  ".join(problems))

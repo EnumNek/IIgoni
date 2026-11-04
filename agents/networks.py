@@ -4,16 +4,27 @@
 1. Сеть из соседней части ``sim/`` — файл ``sim/data/*.net.xml``
    (сценарий ``sim``). Когда sim/ будет готов, агенты автоматически
    переключатся на неё.
-2. Пока её нет — собственные синтетические решётки 2×2 и 4×4
+2. Сеть sim/ с изменениями пользователя: ``network.json``, в ``meta``
+   которого записаны ``base_network`` (= sim/data/network.json) и
+   ``changes`` (так её передаёт backend/). Сеть сценария собирается так же,
+   как в датасете sim/: base.net.xml + патч netconvert (sim.changes), поэтому
+   id светофоров и фазы незатронутых перекрёстков сохраняются и подходят
+   модели, обученные на сети sim/.
+3. Пока сети sim/ нет — собственные синтетические решётки 2×2 и 4×4
    (``grid2x2``, ``grid4x4``), построенные утилитой SUMO ``netgenerate``.
-3. Любая другая сеть: путь к ``.net.xml`` или к ``network.json``
+4. Любая другая сеть: путь к ``.net.xml`` или к ``network.json``
    (формат контракта; если рядом нет .net.xml, он конвертируется
    в сеть SUMO через ``netconvert``).
 
-Спрос генерируется утилитой SUMO ``randomTrips.py`` (+ ``duarouter``):
-поездки между граничными («въездными» и «выездными») улицами, интенсивность
-меняется во времени по профилю часа пик (config.DEMAND_PROFILE), главное
-направление запад↔восток нагружено сильнее (config.MAIN_AXIS_FACTOR).
+Спрос генерируется утилитой SUMO ``randomTrips.py``:
+
+* решётки и прочие сети — поездки между граничными («въездными» и
+  «выездными») улицами (+ ``duarouter``), интенсивность меняется во времени
+  по профилю часа пик (config.DEMAND_PROFILE), главное направление
+  запад↔восток нагружено сильнее (config.MAIN_AXIS_FACTOR);
+* сеть sim/ и её варианты — та же модель спроса, что в датасете sim/
+  (sim/config.py: 6000 авт/ч, поездки между перекрёстками, транзит через
+  границу района), с другим семенем и масштабом для каждого варианта спроса.
 
 Запуск из корня репозитория::
 
@@ -49,10 +60,15 @@ import sumolib  # noqa: E402
 class Scenario:
     """Сеть + всё, что для неё сгенерировано (маршруты, программы actuated)."""
 
-    key: str            # имя сценария: grid2x2, grid4x4, sim, <имя>-<хэш>
+    key: str            # имя сценария: grid2x2, grid4x4, sim, sim-<хэш>, <имя>-<хэш>
     dir: Path           # agents/networks/<key>/ — сгенерированные файлы
     net_file: Path      # сеть SUMO (.net.xml)
     synthetic: bool     # True для наших решёток (известна геометрия «осей»)
+    # Чьи модели использовать: у варианта сети sim/ с изменениями — модели "sim"
+    models_key: str | None = None
+    # Модель спроса: "boundary" — поездки между граничными улицами (решётки,
+    # внешние сети); "sim" — модель спроса датасета sim/ (см. generate_sim_trips)
+    demand: str = "boundary"
 
     @property
     def actuated_file(self) -> Path:
@@ -64,11 +80,29 @@ class Scenario:
 
     @property
     def models_dir(self) -> Path:
-        return config.MODELS_DIR / self.key
+        return config.MODELS_DIR / (self.models_key or self.key)
+
+    @property
+    def routes_dir(self) -> Path:
+        return self.dir / ("routes" if self.demand == "boundary" else f"routes-{self.demand}")
+
+    @property
+    def sumo_args(self) -> list[str]:
+        """Опции SUMO, которых требует модель спроса сценария."""
+        if self.demand != "sim":
+            return []
+        from sim import config as sim_config  # только константы, без зависимостей
+
+        # Как в датасете sim/ (sim/simulate.py): поездки между перекрёстками и
+        # динамическая маршрутизация по текущим временам проезда.
+        return ["--junction-taz", "--ignore-route-errors",
+                "--device.rerouting.probability", "1",
+                "--device.rerouting.period", str(sim_config.REROUTING_PERIOD),
+                "--device.rerouting.adaptation-interval", str(sim_config.REROUTING_ADAPTATION_INTERVAL)]
 
     def train_route(self, seed: int) -> Path:
         """Маршруты для обучения: случайный масштаб спроса (обобщение)."""
-        path = self.dir / "routes" / f"train_s{seed}.rou.xml"
+        path = self.routes_dir / f"train_s{seed}.rou.xml"
         if not path.exists():
             rng = random.Random(seed)
             scale = rng.uniform(*config.TRAIN_DEMAND_SCALE)
@@ -77,7 +111,7 @@ class Scenario:
 
     def eval_route(self, level: str = "nominal", seed: int = config.EVAL_SEEDS[0]) -> Path:
         """Маршруты для оценки: фиксированный уровень спроса, свои семена."""
-        path = self.dir / "routes" / f"eval_{level}_s{seed}.rou.xml"
+        path = self.routes_dir / f"eval_{level}_s{seed}.rou.xml"
         if not path.exists():
             generate_routes(self, path, seed=seed, scale=config.EVAL_DEMAND_LEVELS[level])
         return path
@@ -316,7 +350,12 @@ def generate_routes(sc: Scenario, out_file: Path, seed: int, scale: float = 1.0)
       (для решёток PEAK_RATE_PER_ENTRY, для реальных сетей
       EXTERNAL_PEAK_RATE_PER_LANE — см. config.py).
     * ``--binomial`` даёт случайные (почти пуассоновские) моменты въезда.
+
+    Для сети sim/ и её вариантов — модель спроса датасета sim/
+    (см. generate_sim_trips).
     """
+    if sc.demand == "sim":
+        return generate_sim_trips(sc, out_file, seed=seed, scale=scale)
     net = sumolib.net.readNet(str(sc.net_file))
     entries, exits = boundary_edges(net)
     if not entries or not exits:
@@ -378,8 +417,102 @@ def generate_routes(sc: Scenario, out_file: Path, seed: int, scale: float = 1.0)
     return out_file
 
 
+def generate_sim_trips(sc: Scenario, out_file: Path, seed: int, scale: float = 1.0) -> Path:
+    """Спрос для сети sim/: те же параметры randomTrips, что у датасета sim/.
+
+    sim/generate_traffic.py калибровкой подобрал 6000 авт/ч (сеть близка к
+    пропускной способности, см. sim/README.md). Здесь та же модель — поездки
+    между перекрёстками (``--junction-taz``), чаще с границы района
+    (``--fringe-factor``) и с многополосных улиц (``--lanes``), — но своё
+    семя и масштаб на каждый вариант спроса: обучение (семена 0–9),
+    валидация и тест не пересекаются. Маршрут выбирает SUMO при въезде
+    (опции — Scenario.sumo_args), поэтому файл подходит и для сети с
+    закрытыми участками.
+    """
+    from sim import config as sim_config
+
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out_file.parent / f".tmp_{out_file.stem}"
+    tmp.mkdir(exist_ok=True)
+    try:
+        _run([
+            sys.executable, str(config.SUMO_TOOLS / "randomTrips.py"),
+            "-n", str(sc.net_file), "-o", str(out_file),
+            "-b", "0", "-e", str(config.DEMAND_SECONDS),
+            "--insertion-rate", f"{sim_config.INSERTION_RATE * scale:.1f}", "--random-depart",
+            "--fringe-factor", str(sim_config.FRINGE_FACTOR), "--lanes",
+            "--min-distance", f"{sim_config.MIN_TRIP_DISTANCE:g}",
+            "--junction-taz", "--validate", "--remove-loops",
+            "--seed", str(seed), "--prefix", f"s{seed}_",
+            "--trip-attributes", 'departLane="best" departSpeed="max"',
+        ], cwd=tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return out_file
+
+
 # ---------------------------------------------------------------------------
-# 6. Разрешение сценария по имени или пути
+# 6. Сеть sim/ с изменениями (сценарий из backend/)
+# ---------------------------------------------------------------------------
+SIM_NETWORK_JSON = config.SIM_DATA_DIR / "network.json"
+
+
+def sim_changes_of(json_file: Path) -> list[dict] | None:
+    """Изменения относительно сети sim/, если network.json — её вариант.
+
+    backend/ передаёт сеть сценария JSON-файлом, в meta которого
+    ``base_network`` — путь к sim/data/network.json, ``changes`` — список
+    изменений по контракту. Для любого другого файла — None.
+    """
+    try:
+        meta = json.loads(Path(json_file).read_text(encoding="utf-8")).get("meta") or {}
+    except (OSError, ValueError, AttributeError):
+        return None
+    base, changes = meta.get("base_network"), meta.get("changes")
+    if not base or not isinstance(changes, list) or not SIM_NETWORK_JSON.exists():
+        return None
+    if Path(base).expanduser().resolve() != SIM_NETWORK_JSON.resolve():
+        return None
+    return changes
+
+
+def sim_variant(changes: list[dict]) -> Scenario:
+    """Сеть sim/ с изменениями — так же, как сеть сценария в датасете sim/.
+
+    Изменения применяются к графу sim/data/network.json (sim.changes —
+    общий контракт), разница с базой компилируется в патч netconvert и
+    накладывается на sim/data/base.net.xml. Закрытый участок не удаляется, а
+    запрещается для движения, поэтому id светофоров и фазы незатронутых
+    перекрёстков те же, что в базовой сети: используются модели "sim".
+    Одинаковые итоговые состояния сети дают один и тот же сценарий (кэш).
+    Неверное изменение — sim.changes.ChangeError (это ValueError).
+    """
+    base_net = find_sim_network()
+    if base_net is None or not SIM_NETWORK_JSON.exists():
+        raise FileNotFoundError("Сеть sim/ ещё не готова (нет sim/data/*.net.xml и network.json)")
+    from sim.changes import apply_changes, diff_states, to_netconvert_patches
+
+    base = json.loads(SIM_NETWORK_JSON.read_text(encoding="utf-8"))
+    diff = diff_states(base, apply_changes(base, changes))
+    edg, nod = to_netconvert_patches(diff)
+    if edg is None and nod is None:
+        return get_scenario("sim")
+    key = "sim-" + hashlib.sha1(json.dumps(diff, sort_keys=True).encode()).hexdigest()[:10]
+    d = config.NETWORKS_DIR / key
+    net = d / f"{key}.net.xml"
+    if not net.exists():
+        d.mkdir(parents=True, exist_ok=True)
+        cmd = [_tool("netconvert"), "-s", str(base_net), "-o", str(net), "--no-warnings", "true"]
+        for text, name, flag in ((edg, "patch.edg.xml", "-e"), (nod, "patch.nod.xml", "-n")):
+            if text:
+                (d / name).write_text(text, encoding="utf-8")
+                cmd += [flag, str(d / name)]
+        _run(cmd)
+    return _ensure_artifacts(Scenario(key, d, net, synthetic=False, models_key="sim", demand="sim"))
+
+
+# ---------------------------------------------------------------------------
+# 7. Разрешение сценария по имени или пути
 # ---------------------------------------------------------------------------
 def _ensure_artifacts(sc: Scenario) -> Scenario:
     if not sc.actuated_file.exists():
@@ -414,7 +547,7 @@ def get_scenario(spec: str | Path) -> Scenario:
         if net is None:
             raise FileNotFoundError(
                 "Сеть sim/ ещё не готова (нет sim/data/*.net.xml) — используйте grid2x2/grid4x4")
-        return _ensure_artifacts(Scenario("sim", config.NETWORKS_DIR / "sim", net, synthetic=False))
+        return _ensure_artifacts(Scenario("sim", config.NETWORKS_DIR / "sim", net, synthetic=False, demand="sim"))
 
     path = Path(spec).expanduser()
     if not path.is_absolute() and not path.exists():
@@ -432,7 +565,10 @@ def get_scenario(spec: str | Path) -> Scenario:
     if path.name.endswith(".net.xml"):
         if path.parent.parent == config.NETWORKS_DIR:  # одна из наших сетей
             key = path.parent.name
-            return _ensure_artifacts(Scenario(key, path.parent, path, synthetic=key in config.GRID_SCENARIOS))
+            variant = key.startswith("sim-")  # вариант сети sim/ (см. sim_variant)
+            return _ensure_artifacts(Scenario(key, path.parent, path, synthetic=key in config.GRID_SCENARIOS,
+                                              models_key="sim" if variant else None,
+                                              demand="sim" if variant else "boundary"))
         sim_net = find_sim_network()
         if sim_net is not None and sim_net.resolve() == path:
             return get_scenario("sim")
@@ -444,6 +580,9 @@ def get_scenario(spec: str | Path) -> Scenario:
             return get_scenario(path.parent)
         if path.parent.resolve() == config.SIM_DATA_DIR.resolve() and find_sim_network():
             return get_scenario("sim")
+        changes = sim_changes_of(path)
+        if changes is not None and find_sim_network():
+            return sim_variant(changes)
         siblings = sorted(path.parent.glob("*.net.xml"))
         if siblings:
             return get_scenario(siblings[0])

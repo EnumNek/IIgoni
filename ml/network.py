@@ -208,9 +208,13 @@ def parse_network(network: dict) -> tuple[Topology, State]:
 
 
 def _parse_bool(value, current: bool) -> bool:
-    """Значение для изменения traffic_light. None — переключить текущее состояние."""
+    """Значение для изменения traffic_light: есть ли светофор после изменения.
+
+    Как в общем контракте (sim/changes.py): null, как и false/"off"/"none",
+    означает «убрать светофор»; true/"static"/"actuated" — светофор есть.
+    """
     if value is None:
-        return not current
+        return False
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
@@ -245,7 +249,7 @@ def apply_changes(topo: Topology, base: State, changes: list[dict] | None) -> St
       * close  — ребро target_id закрывается для движения (value игнорируется);
       * open   — ребро снова открывается (в т.ч. помеченное ``closed`` в network.json);
       * traffic_light — target_id: id узла; value: true/1/"add" — поставить
-                 светофор, false/0/"remove" — убрать, null — переключить.
+                 светофор, false/0/"remove"/null — убрать (как в sim/changes.py).
     """
     state = base.copy()
     for raw in changes or []:

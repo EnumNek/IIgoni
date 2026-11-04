@@ -59,6 +59,12 @@ class Settings:
     cors_origins: list[str] = field(
         default_factory=lambda: [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
     )
+    # Семена спроса для agents/evaluate.py (сколько прогонов SUMO на одну оценку режима).
+    # По умолчанию один прогон (семя 101): на сети района это ~15–30 с на режим, и
+    # сравнение режимов идёт на одном и том же спросе. Пусто — значения agents/ (3 прогона).
+    agents_eval_seeds: list[int] = field(
+        default_factory=lambda: [int(x) for x in os.getenv("AGENTS_EVAL_SEEDS", "101").replace(",", " ").split()]
+    )
     # Посчитать прогноз базового сценария при старте (чтобы фронтенду сразу было что показать)
     seed_base_forecast: bool = field(
         default_factory=lambda: os.getenv("SEED_BASE_FORECAST", "1") not in {"0", "false", "no"}

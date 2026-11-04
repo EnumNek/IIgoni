@@ -32,6 +32,9 @@ services:
       REPO_ROOT: /repo
       STUB_NETWORK_PATH: /data/network_stub.json
       WORK_DIR: /data/work
+      # agents/ пишет маршруты и сети сценариев рядом с собой, а /repo — только для чтения
+      AGENTS_NETWORKS_DIR: /data/agents-networks
+      AGENTS_EVAL_SEEDS: ${AGENTS_EVAL_SEEDS:-101}
       INTEGRATION_MODE: ${INTEGRATION_MODE:-auto}
     volumes:
       - ..:/repo:ro

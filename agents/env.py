@@ -215,6 +215,52 @@ class MaxWaitGuard:
 
 
 # ---------------------------------------------------------------------------
+# Фиксированный цикл для светофоров без RL-модели
+# ---------------------------------------------------------------------------
+class FixedCyclePolicy:
+    """Фиксированный цикл исходной программы сети — для светофоров, у которых
+    нет подходящей RL-модели в режиме ``rl``.
+
+    Так бывает в сети с изменениями: пользователь поставил новый светофор или
+    изменил подход к перекрёстку так, что поменялось число фаз. Такой
+    перекрёсток работает как обычный светофор (те же зелёные фазы и их
+    длительности, что в программе сети), остальными управляют агенты.
+    sumo-rl держит фазу, пока её не сменит действие, поэтому цикл
+    воспроизводится действиями: зелёная фаза сменяется следующей, когда
+    истекла её длительность по программе (с точностью до шага решения).
+    """
+
+    DEFAULT_GREEN_S = 30.0
+
+    def __init__(self, env, net_file, ts_ids):
+        net = sumolib.net.readNet(str(net_file), withPrograms=True)
+        known = {tls.getID() for tls in net.getTrafficLights()}
+        self.env = env
+        self.durations: dict[str, list[float]] = {}
+        for ts_id in ts_ids:
+            ts = env.traffic_signals[ts_id]
+            programs = net.getTLS(ts_id).getPrograms() if ts_id in known else {}
+            by_state: dict[str, float] = {}
+            for prog in programs.values():
+                for ph in prog.getPhases():
+                    by_state.setdefault(ph.state, float(ph.duration))
+            self.durations[ts_id] = [by_state.get(ph.state, self.DEFAULT_GREEN_S) for ph in ts.green_phases]
+
+    def act(self, ts_ids) -> dict[str, int]:
+        out = {}
+        for ts_id in ts_ids:
+            if ts_id not in self.durations:
+                continue
+            ts = self.env.traffic_signals[ts_id]
+            phase = ts.green_phase
+            # решение принимается раз в delta_time: переключаемся в ближайший к концу фазы момент
+            if ts.time_since_last_phase_change + ts.delta_time / 2 >= ts.yellow_time + self.durations[ts_id][phase]:
+                phase = (phase + 1) % ts.num_green_phases
+            out[ts_id] = phase
+        return out
+
+
+# ---------------------------------------------------------------------------
 # Награда
 # ---------------------------------------------------------------------------
 def queue_reward(ts) -> float:
@@ -281,7 +327,7 @@ def make_env(sc: Scenario, route_file: Path, mode: str = "rl", seed: int = 0,
     ep = {**config.ENV_PARAMS, **(env_params or {})}
     if mode not in MODES:
         raise ValueError(f"mode должен быть одним из {MODES}, получено: {mode!r}")
-    args = list(extra_args or [])
+    args = list(sc.sumo_args) + list(extra_args or [])
     if mode == "actuated":
         args = ["--additional-files", str(sc.actuated_file)] + args
     return TrafficEnv(

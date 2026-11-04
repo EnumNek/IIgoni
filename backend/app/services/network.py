@@ -186,7 +186,7 @@ class NetworkStore:
                       "geom": point_wkt(n["lon"], n["lat"])} for n in net["nodes"]]
         edge_rows = [{"id": e["id"], "from_node_id": e["from"], "to_node_id": e["to"], "length": e["length"],
                       "lanes": e["lanes"], "speed": e["speed"], "priority": e["priority"],
-                      "name": e.get("name"), "road_type": e.get("type"),
+                      "name": e.get("name"), "road_type": e.get("road_type") or e.get("type"),
                       "geom": linestring_wkt(e["geometry"])} for e in net["edges"]]
         _upsert(session, NetworkNode, node_rows)
         _upsert(session, RoadSegment, edge_rows)

@@ -4,6 +4,9 @@ import { api } from "../api";
 import { duration, edgeTitle, kmh, pct, reverseEdge } from "../network";
 import type { ChangeIn, Forecast, Measurement, NetEdge, NetNode, Network, Selection } from "../types";
 
+// Диапазон числа полос — как в контракте изменений sim/changes.py и backend (1..6)
+const MAX_LANES = 6;
+
 interface Props {
   selection: NonNullable<Selection>;
   baseNetwork: Network; // сеть без изменений
@@ -135,7 +138,7 @@ function EdgeCard(p: Props & { edge: NetEdge; base: NetEdge }) {
         <div className="stepper">
           <button onClick={() => setLanes(Math.max(1, lanes - 1))} aria-label="Меньше полос">−</button>
           <span>{lanes}</span>
-          <button onClick={() => setLanes(Math.min(8, lanes + 1))} aria-label="Больше полос">+</button>
+          <button onClick={() => setLanes(Math.min(MAX_LANES, lanes + 1))} aria-label="Больше полос">+</button>
         </div>
         <button disabled={p.busy || lanes === edge.lanes} onClick={() => p.onApply(targets.map((id) => ({ type: "lanes", target_id: id, value: lanes })))}>
           Применить

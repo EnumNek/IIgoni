@@ -58,14 +58,19 @@ def test_base_scenario_has_forecast_and_is_readonly(client, network):
 def test_change_validation(client, network):
     sc = client.post("/scenarios", json={"name": "валидация"}).json()
     edge = network["edges"][0]["id"]
-    node = network["nodes"][0]["id"]
+    node = next(n["id"] for n in network["nodes"] if n["type"] != "dead_end")
     bad = [
         {"type": "lanes", "target_id": "нет-такого", "value": 2},
         {"type": "lanes", "target_id": edge, "value": 0},
+        {"type": "lanes", "target_id": edge, "value": 7},  # диапазон контракта sim/: 1..6
         {"type": "speed", "target_id": edge, "value": "быстро"},
         {"type": "traffic_light", "target_id": edge, "value": True},  # светофор ставится на узел
+        {"type": "traffic_light", "target_id": node, "value": "мигающий"},
         {"type": "teleport", "target_id": edge},
     ]
+    dead_end = next((n["id"] for n in network["nodes"] if n["type"] == "dead_end"), None)
+    if dead_end is not None:  # как в sim/changes.py: светофор в тупике невозможен
+        bad.append({"type": "traffic_light", "target_id": dead_end, "value": True})
     for ch in bad:
         assert client.post(f"/scenarios/{sc['id']}/changes", json=ch).status_code == 422, ch
     ok = client.post(f"/scenarios/{sc['id']}/changes", json=[
@@ -196,3 +201,26 @@ def test_api_prefix_and_encoded_ids(client, network):
     r = client.get(f"/api/edges/{quote(edge, safe='')}")
     assert r.status_code == 200 and r.json()["edge"]["id"] == edge
     assert client.get("/api/health").json()["status"] == "ok"
+
+
+def test_signal_correction_is_calibrated_to_sumo(client, network):
+    """Поправка на режим светофоров не преувеличивает эффект: если в SUMO время в пути
+    сократилось на 2 %, карта показывает те же 2 %, а не больше."""
+    from app.services.forecasting import calibrate_to_sumo, compute_summary, results_dict
+    from app.db import SessionLocal
+
+    _, fid = _busiest_edge(client, network)
+    with SessionLocal() as session:
+        raw = results_dict(session, fid)
+    tls = {n["id"] for n in network["nodes"] if n["type"] == "traffic_light"}
+    factors = {n: 0.3 for n in tls}
+    t0 = compute_summary(network, raw)["mean_trip_time"]
+    out, k, info = calibrate_to_sumo(network, raw, factors, {"mean_travel_time": 100.0}, {"mean_travel_time": 98.0})
+    assert 0 < info["alpha"] < 1 and all(0.3 < v < 1 for v in k.values())
+    assert compute_summary(network, out)["mean_trip_time"] / t0 == pytest.approx(0.98, abs=2e-3)
+    # SUMO даёт эффект сильнее карты — поправка не усиливается
+    out, k, info = calibrate_to_sumo(network, raw, factors, {"mean_travel_time": 100.0}, {"mean_travel_time": 10.0})
+    assert info["alpha"] == 1.0 and k == factors
+    # по SUMO режим хуже — эффект на карте не показывается
+    out, k, info = calibrate_to_sumo(network, raw, factors, {"mean_travel_time": 100.0}, {"mean_travel_time": 105.0})
+    assert info["alpha"] == 0.0 and out == raw

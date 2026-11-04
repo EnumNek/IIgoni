@@ -1,12 +1,18 @@
 """Проверка и применение изменений сети.
 
-Формат изменения (контракт): {type: "lanes"|"speed"|"close"|"open"|"traffic_light", target_id, value}
+Формат изменения (контракт, тот же, что sim/changes.py): {type, target_id, value}
 
-    lanes          target_id = id участка, value = число полос (1..8)
+    lanes          target_id = id участка, value = число полос (1..6)
     speed          target_id = id участка, value = разрешённая скорость, м/с (1..40)
     close          target_id = id участка, value не используется (null)
     open           target_id = id участка, value не используется — отменяет close
-    traffic_light  target_id = id узла,    value = true (поставить светофор) / false (убрать)
+    traffic_light  target_id = id узла,    value = true / "static" (поставить светофор
+                   с фиксированным циклом), "actuated" (адаптивный светофор),
+                   false / "off" / null (убрать светофор)
+
+Диапазоны и значения совпадают с sim/changes.py: на них построен датасет, и
+те же изменения затем получают ml/predict.py и agents/evaluate.py. Значение
+traffic_light хранится в каноническом виде: true, false или "actuated".
 
 Изменения применяются строго по порядку (поле seq в БД), поэтому
 «закрыть -> открыть» или «2 полосы -> 3 полосы» дают ожидаемый итог.
@@ -18,7 +24,7 @@ from typing import Any
 from ..models import CHANGE_TYPES
 
 EDGE_CHANGES = {"lanes", "speed", "close", "open"}
-LANES_RANGE = (1, 8)
+LANES_RANGE = (1, 6)
 SPEED_RANGE = (1.0, 40.0)  # м/с: 3,6 … 144 км/ч
 
 
@@ -26,20 +32,37 @@ class ChangeError(ValueError):
     """Некорректное изменение (неизвестный тип, нет такого участка/узла, значение вне диапазона)."""
 
 
-def _as_bool(value: Any) -> bool:
+_TL_ON = {"true", "1", "yes", "add", "on", "static", "fixed"}
+_TL_OFF = {"false", "0", "no", "remove", "off", "none"}
+
+
+def tl_value(value: Any) -> bool | str:
+    """Каноническое значение traffic_light: True (светофор), False (нет) или "actuated".
+
+    Синонимы как в sim/changes.py: true/"on"/"static" — светофор с
+    фиксированным циклом, false/null/"none"/"off" — убрать светофор.
+    """
     if value is None:
-        return True
+        return False
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
         return value != 0
     if isinstance(value, str):
         v = value.strip().lower()
-        if v in {"true", "1", "yes", "add", "on"}:
+        if v == "actuated":
+            return "actuated"
+        if v in _TL_ON:
             return True
-        if v in {"false", "0", "no", "remove", "off"}:
+        if v in _TL_OFF:
             return False
-    raise ChangeError(f"Для traffic_light ожидается true/false, получено {value!r}")
+    raise ChangeError(f"Для traffic_light ожидается true/false, \"static\", \"actuated\" или \"off\", "
+                      f"получено {value!r}")
+
+
+def _as_bool(value: Any) -> bool:
+    """Есть ли светофор после изменения."""
+    return tl_value(value) is not False
 
 
 def normalize_change(change: dict, edge_ids, node_ids) -> dict:
@@ -78,7 +101,11 @@ def normalize_change(change: dict, edge_ids, node_ids) -> dict:
     elif ctype in {"close", "open"}:
         value = None
     else:  # traffic_light
-        value = _as_bool(value)
+        value = tl_value(value)
+        node = node_ids.get(target) if isinstance(node_ids, dict) else None
+        if value is not False and isinstance(node, dict) and node.get("type") == "dead_end":
+            # как в sim/changes.py: на тупике (граница района) регулировать нечего
+            raise ChangeError(f"Узел {target!r} — тупик (граница района): светофор там невозможен")
     return {"type": ctype, "target_id": target, "value": value}
 
 

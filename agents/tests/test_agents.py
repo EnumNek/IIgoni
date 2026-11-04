@@ -137,3 +137,58 @@ def test_env_params_override(grid2x2):
         assert env.min_green == 10 and env.delta_time == config.ENV_PARAMS["delta_time"]
     finally:
         env.close()
+
+
+def test_evaluate_reports_avg_speed(grid2x2):
+    res = evaluate("grid2x2", "fixed", seeds=[config.EVAL_SEEDS[0]])
+    assert 0 < res["avg_speed"] < 14 and res["rl_fallback_tls"] == []
+    assert all(v["avg_delay_rate"] >= v["avg_queue_length"] * 0.5 for v in res["per_tls"].values())
+
+
+@pytest.mark.skipif(not (config.MODELS_DIR / "grid2x2" / "meta.json").exists(),
+                    reason="модели grid2x2 не обучены")
+def test_rl_falls_back_to_fixed_cycle_without_model(tmp_path, grid2x2):
+    """Светофор без подходящей модели (например, новый) работает по циклу программы сети,
+    остальными управляют агенты."""
+    import shutil
+
+    src = config.MODELS_DIR / "grid2x2"
+    for f in src.iterdir():
+        shutil.copy(f, tmp_path / f.name)
+    meta = json.loads((tmp_path / "meta.json").read_text(encoding="utf-8"))
+    del meta["agents"]["B1"]
+    (tmp_path / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    res = evaluate("grid2x2", "rl", seeds=[config.EVAL_SEEDS[0]], models_dir=tmp_path)
+    assert res["rl_fallback_tls"] == ["B1"]
+    assert res["avg_travel_time"] > 0 and res["throughput"] > 0
+
+
+SIM_JSON = config.SIM_DATA_DIR / "network.json"
+
+
+@pytest.mark.skipif(not SIM_JSON.exists(), reason="сети sim/ нет")
+def test_sim_variant_from_backend_json(tmp_path):
+    """Сеть сценария от backend/ (network.json + meta.base_network/changes) собирается из
+    base.net.xml патчем sim/: id светофоров те же, модели и спрос — от сети sim/."""
+    import sumolib
+
+    from agents.networks import find_sim_network
+
+    base = json.loads(SIM_JSON.read_text(encoding="utf-8"))
+    edge = next(e["id"] for e in base["edges"] if e["lanes"] == 1)
+    payload = {**base, "meta": {**base["meta"], "base_network": str(SIM_JSON),
+                                "changes": [{"type": "close", "target_id": edge, "value": None}]}}
+    path = tmp_path / "network_scenario.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    sc = get_scenario(path)
+    assert sc.key.startswith("sim-") and sc.models_dir == config.MODELS_DIR / "sim" and sc.demand == "sim"
+    assert "--junction-taz" in sc.sumo_args
+    net = sumolib.net.readNet(str(sc.net_file))
+    assert not net.getEdge(edge).allows("passenger")  # закрыт, но не удалён
+    base_tls = {t.getID() for t in sumolib.net.readNet(str(find_sim_network())).getTrafficLights()}
+    assert {t.getID() for t in net.getTrafficLights()} == base_tls
+    assert get_scenario(path).key == sc.key  # повторный вызов — та же сеть (кэш)
+    # без изменений — базовая сеть sim/
+    payload["meta"]["changes"] = []
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert get_scenario(path).key == "sim"

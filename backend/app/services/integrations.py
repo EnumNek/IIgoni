@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import logging
 import math
 import sys
@@ -72,12 +73,91 @@ def to_jsonable(obj: Any) -> Any:
     return obj
 
 
+# ------------------------------------------------------------------ формат ответа agents/evaluate.py
+# agents/evaluate.py отдаёт метрики с префиксом avg_ (avg_waiting_time, ...), а бэкенд,
+# заглушка и фронтенд используют mean_*. Ответ приводится к одному виду: недостающее
+# имя mean_* заполняется из синонима, исходные ключи сохраняются.
+AGENT_METRIC_ALIASES = {
+    "mean_travel_time": ("avg_travel_time",),
+    "mean_waiting_time": ("avg_waiting_time",),
+    "mean_queue_length": ("avg_queue_length",),
+    "mean_speed": ("avg_speed",),
+    "mean_time_loss": ("avg_time_loss",),
+    "mean_delay_rate": ("avg_delay_rate",),  # по светофору: Σ(1 − v/v_max) на подходах, авт.·с/с
+}
+
+
+def _with_aliases(metrics: dict) -> dict:
+    out = dict(metrics)
+    for canon, aliases in AGENT_METRIC_ALIASES.items():
+        if out.get(canon) is None:
+            value = next((out[a] for a in aliases if out.get(a) is not None), None)
+            if value is not None:
+                out[canon] = value
+    return out
+
+
+def normalize_agent_metrics(metrics: dict, network: dict | None = None) -> dict:
+    """Метрики evaluate() -> единый вид бэкенда.
+
+    * mean_waiting_time / mean_travel_time / mean_queue_length / mean_speed
+      из avg_* (формат agents/evaluate.py);
+    * per_tls — по id УЗЛОВ сети: agents/ отдаёт id светофоров SUMO, которые у
+      объединённых перекрёстков могут отличаться от id узла (поле tl_id в
+      network.json); у каждого светофора те же синонимы метрик.
+    """
+    out = _with_aliases(metrics)
+    per_tls = out.get("per_tls")
+    if isinstance(per_tls, dict):
+        tl_nodes: dict[str, list[str]] = {}
+        for n in (network or {}).get("nodes", []):
+            if n.get("tl_id") is not None and str(n["tl_id"]) != str(n["id"]):
+                tl_nodes.setdefault(str(n["tl_id"]), []).append(str(n["id"]))
+        mapped: dict[str, dict] = {}
+        for tls_id, m in per_tls.items():
+            m = _with_aliases(m) if isinstance(m, dict) else {"value": m}
+            for node_id in tl_nodes.get(str(tls_id), [str(tls_id)]):
+                mapped[node_id] = m
+        out["per_tls"] = mapped
+    return out
+
+
+def agent_warnings(metrics: dict) -> list[str]:
+    """Предупреждения по ответу agents/evaluate.py (и для свежих, и для кэшированных метрик)."""
+    fallback = metrics.get("rl_fallback_tls") or []
+    if not fallback:
+        return []
+    return [f"ИИ-агенты: для {len(fallback)} светофоров нет обученной модели (новый светофор или "
+            "изменились фазы) — они работают по фиксированному циклу"]
+
+
+def _model_info_from_ml(raw: dict, weights_dir: Path | None) -> dict:
+    """ml/predict.py: model_info() -> {model: {...}, dataset, created_utc, test_metrics}
+    -> поля таблицы nn_models (name, version, architecture, metrics, weights_path)."""
+    model = raw.get("model") or {}
+    dataset = raw.get("dataset") or {}
+    info = {
+        "name": f"GNN {model.get('variant') or model.get('conv') or ''}".strip(),
+        "version": str(raw.get("created_utc") or "unversioned"),
+        "architecture": model.get("title") or "Graph Neural Network (PyTorch Geometric)",
+        "metrics": {"test": raw.get("test_metrics"), "dataset": dataset},
+    }
+    if weights_dir is not None and (Path(weights_dir) / "gnn.pt").exists():
+        try:
+            info["weights_path"] = str((Path(weights_dir) / "gnn.pt").resolve().relative_to(REPO_ROOT))
+        except ValueError:
+            info["weights_path"] = str(Path(weights_dir) / "gnn.pt")
+    return info
+
+
 @dataclass
 class Integrations:
     cfg: Settings = field(default_factory=lambda: settings)
     _predictor: Provider | None = None
     _evaluator: Provider | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    # agents/ гоняет SUMO через libsumo: одна симуляция на процесс — вызовы по очереди
+    _eval_lock: threading.Lock = field(default_factory=threading.Lock)
 
     # -------------------------------------------------- загрузка
     def _provider(self, path: Path, func: str, module_name: str, stub_fn: Callable, real_source: str) -> Provider:
@@ -125,13 +205,16 @@ class Integrations:
         if p.source == "stub":
             return dict(predict_stub.MODEL_INFO)
         info = getattr(p.module, "MODEL_INFO", None)
-        getter = getattr(p.module, "get_model_info", None)
+        getter = getattr(p.module, "get_model_info", None) or getattr(p.module, "model_info", None)
         if info is None and callable(getter):
             try:
                 info = getter()
             except Exception:  # noqa: BLE001
+                log.warning("model_info() модуля ml/ завершился ошибкой: %s", traceback.format_exc())
                 info = None
         info = dict(info or {})
+        if isinstance(info.get("model"), dict):  # формат ml/predict.model_info()
+            info = _model_info_from_ml(info, getattr(p.module, "WEIGHTS_DIR", None))
         if "weights_path" not in info:
             weights = sorted(
                 (f for ext in ("*.pt", "*.pth", "*.ckpt") for f in self.cfg.ml_dir.rglob(ext)),
@@ -162,13 +245,32 @@ class Integrations:
             warnings.append(f"ml/predict.py завершился ошибкой ({type(exc).__name__}: {exc}) — использована заглушка")
             return predict_stub.predict(network, changes), "stub", warnings
 
-    def evaluate(self, network_path: Path, mode: str) -> tuple[dict, str, list[str]]:
+    def _evaluate_kwargs(self, fn: Callable) -> dict:
+        """Необязательные параметры evaluate(): число прогонов SUMO (AGENTS_EVAL_SEEDS)."""
+        seeds = self.cfg.agents_eval_seeds
+        if not seeds:
+            return {}
+        try:
+            params = inspect.signature(fn).parameters
+        except (TypeError, ValueError):
+            return {}
+        return {"seeds": seeds} if "seeds" in params else {}
+
+    def evaluate(self, network_path: Path, mode: str, network: dict | None = None) -> tuple[dict, str, list[str]]:
+        """-> (метрики в едином виде, кто считал: agents|stub, предупреждения).
+
+        network — граф, по которому per_tls переводится в id узлов (см. normalize_agent_metrics).
+        """
         p = self.evaluator
         warnings: list[str] = []
         if p.load_error and self.cfg.integration_mode == "auto":
             warnings.append(f"agents/evaluate.py недоступен ({p.load_error}) — оценка выполнена заглушкой")
         try:
-            metrics = p.fn(str(network_path), mode)
+            if p.source == "stub":
+                metrics = p.fn(str(network_path), mode)
+            else:
+                with self._eval_lock:
+                    metrics = p.fn(str(network_path), mode, **self._evaluate_kwargs(p.fn))
             source = p.source
         except Exception as exc:  # noqa: BLE001
             if p.source == "stub" or self.cfg.integration_mode == "real":
@@ -176,7 +278,9 @@ class Integrations:
             log.error("agents/evaluate.py упал: %s", traceback.format_exc())
             warnings.append(f"agents/evaluate.py завершился ошибкой ({type(exc).__name__}: {exc}) — использована заглушка")
             metrics, source = evaluate_stub.evaluate(network_path, mode), "stub"
-        metrics = to_jsonable(metrics if isinstance(metrics, dict) else {"value": metrics})
+        metrics = metrics if isinstance(metrics, dict) else {"value": metrics}
+        warnings += agent_warnings(metrics)
+        metrics = to_jsonable(normalize_agent_metrics(metrics, network))
         return metrics, source, warnings
 
     def status(self) -> dict:

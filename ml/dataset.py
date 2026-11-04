@@ -1,9 +1,16 @@
-"""Загрузчик датасета: sim/data/*.parquet (SUMO) или синтетический датасет ml/.
+"""Загрузчик датасета: sim/data/dataset/*.parquet (SUMO) или синтетический датасет ml/.
 
 Источник выбирается так (режим ``auto``):
-  * если в sim/data/ есть *.parquet и network.json — используется датасет SUMO;
+  * если есть sim/data/network.json и parquet-файлы датасета sim/ —
+    используется датасет SUMO. sim/ кладёт их в sim/data/dataset/
+    (edges.parquet — метрики рёбер, scenarios.parquet — изменения);
+    для совместимости принимаются и файлы прямо в sim/data/;
   * иначе — синтетический датасет ml/data/synthetic/ (если его нет, он
     генерируется автоматически командой из ml/synthetic.py).
+
+Вспомогательные файлы sim/ в обучение не идут: nodes.parquet (состояние
+узлов) и seed_noise.parquet (базовая сеть при разных зёрнах SUMO). Последний
+читается отдельно — по нему оценивается «шумовой пол» прогноза.
 
 Загрузчик сознательно терпим к деталям формата, о которых части системы ещё
 не договорились окончательно:
@@ -55,6 +62,9 @@ class TrafficDataset:
     source: str
     path: Path
     meta: dict = field(default_factory=dict)
+    # (K, E, 3) — базовая сеть при K разных зёрнах симулятора (sim/: seed_noise.parquet);
+    # по ним оценивается шумовой пол, если базовых прогонов в самом датасете мало.
+    noise_Y: np.ndarray | None = None
 
     @property
     def n_scenarios(self) -> int:
@@ -91,10 +101,38 @@ def _parse_changes(v) -> list[dict]:
     return [dict(c) for c in list(v)]
 
 
+# Вспомогательные таблицы sim/, которые не описывают сценарии: состояние узлов и
+# прогоны базовой сети при разных зёрнах SUMO (шум симуляции).
+SIM_AUX_TABLES = ("nodes", "seed_noise")
+
+
 def find_sim_dataset(sim_dir: Path = SIM_DATA_DIR) -> list[Path]:
+    """Parquet-файлы датасета sim/: sim/data/dataset/*.parquet (так их пишет
+    sim.build_dataset), иначе — sim/data/*.parquet."""
     if not (sim_dir / "network.json").exists():
         return []
-    return sorted(sim_dir.glob("*.parquet"))
+    for d in (sim_dir / "dataset", sim_dir):
+        paths = [p for p in sorted(d.glob("*.parquet")) if p.stem not in SIM_AUX_TABLES]
+        if paths:
+            return paths
+    return []
+
+
+def read_seed_noise(path: Path, topo: Topology) -> np.ndarray | None:
+    """seed_noise.parquet (seed, edge_id, метрики) -> (K, E, 3) или None."""
+    if not path.exists():
+        return None
+    df = _norm_columns(pd.read_parquet(path))
+    if not {"seed", "edge_id"} <= set(df.columns) or not set(TARGETS) <= set(df.columns):
+        log.warning("%s: неожиданный формат (нужны seed, edge_id, %s) — пропущен", path.name, ", ".join(TARGETS))
+        return None
+    seeds = np.sort(df["seed"].unique())
+    e_idx = pd.Index(topo.edge_ids).get_indexer(df["edge_id"].astype(str))
+    s_idx = pd.Index(seeds).get_indexer(df["seed"])
+    keep = e_idx >= 0
+    out = np.full((len(seeds), topo.n_edges, len(TARGETS)), np.nan, dtype=np.float32)
+    out[s_idx[keep], e_idx[keep]] = df.loc[keep, list(TARGETS)].to_numpy(np.float32)
+    return out
 
 
 def read_parquet_dataset(paths: list[Path], network: dict, source: str = "sim") -> TrafficDataset:
@@ -169,10 +207,17 @@ def load_dataset(source: str = "auto", synth_dir: Path = SYNTH_DIR, sim_dir: Pat
     if source in ("auto", "sim"):
         paths = find_sim_dataset(sim_dir)
         if paths:
-            log.info("Датасет SUMO: %s (%d файлов)", sim_dir, len(paths))
-            return read_parquet_dataset(paths, load_network(sim_dir / "network.json"), "sim")
+            log.info("Датасет SUMO: %s (%s)", paths[0].parent, ", ".join(p.name for p in paths))
+            ds = read_parquet_dataset(paths, load_network(sim_dir / "network.json"), "sim")
+            ds.noise_Y = read_seed_noise(paths[0].parent / "seed_noise.parquet", ds.topo)
+            meta_path = paths[0].parent / "meta.json"
+            if meta_path.exists():
+                ds.meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            return ds
         if source == "sim":
-            raise FileNotFoundError(f"В {sim_dir} нет network.json и *.parquet")
+            raise FileNotFoundError(
+                f"Нет датасета sim/: нужны {sim_dir / 'network.json'} и {sim_dir / 'dataset'}/*.parquet "
+                "(python -m sim.build_dataset)")
         log.info("Датасета sim/ ещё нет — используется синтетический (%s)", synth_dir)
     if not (synth_dir / "edge_metrics.parquet").exists():
         from ml.stub_network import resolve_network

@@ -8,7 +8,10 @@
      прогнозу применяется поправка по результатам agents/evaluate.py:
      для участков перед регулируемыми перекрёстками «лишнее» время
      (сверх времени свободного проезда) умножается на отношение средних
-     задержек на этом перекрёстке k = W_mode / W_fixed. Это позволяет
+     задержек на этом перекрёстке k = W_mode / W_fixed. Затем поправка
+     согласуется с SUMO (calibrate_to_sumo): если по карте время в пути по
+     району падает сильнее, чем в прогонах SUMO для того же сценария, все
+     поправки равномерно ослабляются (k' = 1 − α(1 − k)). Это позволяет
      показать эффект агентов на тепловой карте, не переобучая GNN под
      каждый режим (в перспективе режим можно подать в GNN как признак);
   4. результаты по каждому участку пишутся в forecast_results, сводка — в forecasts.summary.
@@ -87,6 +90,22 @@ def apply_signal_correction(net: dict, results: dict[str, dict], fixed: dict, mo
         a, b = _num(a), _num(b)
         return a / b if a is not None and b and b > 0 else None
 
+    def node_ratio(node: str) -> float | None:
+        """Отношение задержек на перекрёстке «режим / обычные светофоры».
+
+        Порядок: среднее ожидание (заглушка), интенсивность задержки на подходах
+        Σ(1 − v/v_max) (agents/evaluate.py), средняя очередь. При одном и том же
+        спросе поток через перекрёсток одинаков, и по формуле Литтла отношение
+        интенсивностей задержки равно отношению средних задержек машины. Очередь
+        считает только стоящие машины и занижает задержку при коротких циклах
+        RL-агентов, поэтому она — запасной вариант."""
+        m, f = per_m.get(node) or {}, per_f.get(node) or {}
+        for key in ("mean_waiting_time", "mean_delay_rate", "mean_queue_length"):
+            k = ratio(m.get(key), f.get(key))
+            if k is not None:
+                return k
+        return None
+
     per_f = fixed.get("per_tls") or {}
     per_m = mode_metrics.get("per_tls") or {}
     k_global = ratio(mode_metrics.get("mean_waiting_time"), fixed.get("mean_waiting_time")) or \
@@ -95,11 +114,11 @@ def apply_signal_correction(net: dict, results: dict[str, dict], fixed: dict, mo
     factors: dict[str, float] = {}
     for e in net["edges"]:
         r = results.get(e["id"])
-        if r is None or r["closed"] or nodes.get(e["to"], {}).get("type") != "traffic_light":
+        if r is None or r["closed"] or not str(nodes.get(e["to"], {}).get("type", "")).startswith("traffic_light"):
             continue
         node = e["to"]
         if node not in factors:
-            k = ratio((per_m.get(node) or {}).get("mean_waiting_time"), (per_f.get(node) or {}).get("mean_waiting_time"))
+            k = node_ratio(node)
             factors[node] = float(np.clip(k if k is not None else k_global, 0.2, 3.0))
         k = factors[node]
         free = e["length"] / max(e["speed"], 0.1)
@@ -111,6 +130,70 @@ def apply_signal_correction(net: dict, results: dict[str, dict], fixed: dict, mo
         r["travel_time"] = new_tt
         r["mean_speed"] = e["length"] / new_tt
     return factors
+
+
+def _with_factors(net: dict, results: dict[str, dict], factors: dict[str, float]) -> dict[str, dict]:
+    """Копия прогноза с поправкой k на участках перед светофорами (как apply_signal_correction)."""
+    out = {eid: dict(r) for eid, r in results.items()}
+    for e in net["edges"]:
+        r = out.get(e["id"])
+        k = factors.get(e["to"])
+        if r is None or k is None or r["closed"]:
+            continue
+        free = e["length"] / max(e["speed"], 0.1)
+        tt = r["travel_time"]
+        new_tt = free + max(tt - free, 0.0) * k
+        if new_tt <= 0 or tt <= 0:
+            continue
+        r["occupancy"] = float(min(1.0, r["occupancy"] * new_tt / tt))
+        r["travel_time"] = new_tt
+        r["mean_speed"] = e["length"] / new_tt
+    return out
+
+
+def calibrate_to_sumo(net: dict, raw: dict[str, dict], factors: dict[str, float],
+                      fixed: dict, mode_metrics: dict) -> tuple[dict[str, dict], dict[str, float], dict]:
+    """Согласует поправку на режим светофоров с прогонами SUMO.
+
+    Поправки по перекрёсткам считаются по их локальным задержкам, а время в пути
+    по району зависит и от задержек вне светофоров (заторы у закрытых улиц,
+    нерегулируемые перекрёстки), которые агенты не убирают. Поэтому эффект на
+    карте сравнивается с эффектом в SUMO на той же сети и том же спросе:
+    R = mean_travel_time(режим) / mean_travel_time(fixed). Если по карте среднее
+    время в пути падает сильнее, все поправки равномерно ослабляются,
+    k' = 1 − α·(1 − k), α ∈ [0, 1] — подбирается бисекцией. Усиливать поправку
+    сверх отношения задержек на перекрёстках нельзя (α ≤ 1).
+    -> (прогноз с поправкой, поправки, сведения о согласовании).
+    """
+    def trip(results: dict) -> float | None:
+        return compute_summary(net, results).get("mean_trip_time")
+
+    def shrink(alpha: float) -> dict[str, float]:
+        return {n: 1.0 - alpha * (1.0 - k) for n, k in factors.items()}
+
+    full = _with_factors(net, raw, factors)
+    t0, t1 = trip(raw), trip(full)
+    target = None
+    a, b = _num(mode_metrics.get("mean_travel_time")), _num(fixed.get("mean_travel_time"))
+    if a is not None and b:
+        target = a / b
+    info = {"alpha": 1.0, "sumo_ratio": target, "map_ratio": (t1 / t0) if t0 and t1 else None}
+    if not t0 or not t1 or target is None or t1 / t0 >= target - 1e-3:
+        return full, factors, info  # карта не преувеличивает эффект — как есть
+    if target >= 1.0:  # по SUMO режим не сокращает время в пути — поправку не показываем
+        info.update(alpha=0.0, map_ratio=1.0)
+        return {eid: dict(r) for eid, r in raw.items()}, shrink(0.0), info
+    lo, hi = 0.0, 1.0  # t(lo)/t0 >= target > t(hi)/t0
+    for _ in range(14):
+        mid = (lo + hi) / 2
+        if trip(_with_factors(net, raw, shrink(mid))) / t0 >= target:
+            lo = mid
+        else:
+            hi = mid
+    alpha = lo
+    out = _with_factors(net, raw, shrink(alpha))
+    info.update(alpha=round(alpha, 3), map_ratio=trip(out) / t0)
+    return out, shrink(alpha), info
 
 
 # ------------------------------------------------------------------ сводные метрики
@@ -184,11 +267,15 @@ def run_forecast(session: Session, scenario: Scenario, signal_mode: str = "fixed
     if signal_mode != "fixed":
         metrics, w, _ = evaluate_modes(session, scenario, ["fixed", signal_mode])
         warnings += w
+        raw_results = {eid: dict(r) for eid, r in results.items()}
         factors = apply_signal_correction(net, results, metrics["fixed"], metrics[signal_mode])
+        results, factors, calibration = calibrate_to_sumo(net, raw_results, factors,
+                                                          metrics["fixed"], metrics[signal_mode])
         agent_metrics = {
             "fixed": {k: v for k, v in metrics["fixed"].items() if k != "per_tls"},
             signal_mode: {k: v for k, v in metrics[signal_mode].items() if k != "per_tls"},
             "tls_factors": factors,
+            "calibration": calibration,
         }
 
     summary = compute_summary(net, results)

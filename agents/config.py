@@ -18,7 +18,10 @@ from pathlib import Path
 AGENTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = AGENTS_DIR.parent
 SIM_DATA_DIR = REPO_ROOT / "sim" / "data"          # данные соседней части sim/
-NETWORKS_DIR = AGENTS_DIR / "networks"             # наши сети и маршруты
+# Наши сети и сгенерированные для них файлы (маршруты, actuated-программы, сети
+# сценариев sim-<хэш>). AGENTS_NETWORKS_DIR — другая папка, если репозиторий
+# доступен только для чтения (например, смонтирован в контейнер бэкенда).
+NETWORKS_DIR = Path(os.environ.get("AGENTS_NETWORKS_DIR") or AGENTS_DIR / "networks").resolve()
 MODELS_DIR = AGENTS_DIR / "models"                 # обученные DQN-модели
 REPORTS_DIR = AGENTS_DIR / "reports"               # графики и таблицы
 

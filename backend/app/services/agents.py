@@ -3,6 +3,11 @@
 Контракт agents/evaluate.py принимает ПУТЬ к сети, поэтому для сценария с
 изменениями бэкенд записывает изменённую сеть в backend/data/work/
 (закрытые участки удалены, тип узлов обновлён) и передаёт этот путь.
+В meta файла — base_network (исходный network.json) и changes: по ним
+agents/ собирает сеть сценария из sim/data/base.net.xml тем же патчем
+netconvert, что и датасет sim/ (id и фазы светофоров сохраняются, подходят
+обученные модели). Ответ приводится к единому виду (mean_*, per_tls по id
+узлов) в integrations.normalize_agent_metrics.
 Результаты кэшируются в таблице agent_evaluations по хэшу «сеть + изменения»:
 настоящая оценка прогоняет SUMO и может занимать минуты.
 """
@@ -19,7 +24,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import SIGNAL_MODES, AgentEvaluation, Scenario
 from .changes import apply_changes, export_for_simulation
-from .integrations import integrations
+from .integrations import agent_warnings, integrations
 from .network import store
 
 
@@ -60,10 +65,11 @@ def evaluate_modes(session: Session, scenario: Scenario | None, modes: list[str]
         ).first()
         if cached is not None and cached.evaluator == integrations.evaluator.source:
             results[mode] = {**cached.metrics, "evaluator": cached.evaluator, "cached": True}
+            warnings += [w for w in agent_warnings(cached.metrics) if w not in warnings]
             continue
         path = path or write_network_file(changes, chash)
         t0 = time.perf_counter()
-        metrics, source, warn = integrations.evaluate(path, mode)
+        metrics, source, warn = integrations.evaluate(path, mode, network=store.load())
         warnings += [w for w in warn if w not in warnings]
         rec = AgentEvaluation(scenario_id=scenario.id if scenario else None, config_hash=chash, mode=mode,
                               evaluator=source, metrics=metrics, duration_ms=(time.perf_counter() - t0) * 1000)

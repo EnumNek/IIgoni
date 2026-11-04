@@ -40,7 +40,8 @@ export type SignalMode = "fixed" | "actuated" | "rl";
 export interface ChangeIn {
   type: ChangeType;
   target_id: string;
-  value?: number | boolean | null;
+  // traffic_light: true — светофор (фиксированный цикл), "actuated" — адаптивный, false — убрать
+  value?: number | boolean | string | null;
 }
 
 export interface Change extends ChangeIn {

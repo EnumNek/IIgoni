@@ -62,7 +62,8 @@ export function describeChange(ch: ChangeIn, net: Network | null): string {
       // Перекрёсток называем по улицам, которые в нём сходятся
       const names = [...new Set((net?.edges ?? []).filter((x) => x.to === ch.target_id && x.name).map((x) => x.name))];
       const where = names.length ? `Перекрёсток ${names.slice(0, 2).join(" / ")}` : `Узел ${ch.target_id}`;
-      return `${where}: светофор ${ch.value === false ? "убран" : "добавлен"}`;
+      const what = ch.value === false ? "убран" : ch.value === "actuated" ? "адаптивный" : "добавлен";
+      return `${where}: светофор ${what}`;
     }
   }
 }

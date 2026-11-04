@@ -30,14 +30,14 @@ def test_apply_changes_semantics(grid_network):
         {"type": "open", "target_id": "A3A2", "value": None},
         {"type": "traffic_light", "target_id": "A0", "value": True},
         {"type": "traffic_light", "target_id": "B1", "value": "remove"},
-        {"type": "traffic_light", "target_id": "C0", "value": None},  # переключение
+        {"type": "traffic_light", "target_id": "C2", "value": None},  # null — убрать (контракт sim/)
     ])
     e = topo.edge_pos
     assert st.lanes[e["A0A1"]] == 3
     assert st.speed[e["A1A2"]] == pytest.approx(60 / 3.6)
     assert st.closed[e["A2A3"]] and not st.closed[e["A3A2"]]
     n = topo.node_pos
-    assert st.tl[n["A0"]] and not st.tl[n["B1"]] and st.tl[n["C0"]] != base.tl[n["C0"]]
+    assert st.tl[n["A0"]] and not st.tl[n["B1"]] and base.tl[n["C2"]] and not st.tl[n["C2"]]
     # базовое состояние не изменилось
     assert not base.closed.any() and base.lanes[e["A0A1"]] == 1
 
