@@ -91,8 +91,8 @@ sequenceDiagram
     P-->>B: {edge_id: occupancy, mean_speed, travel_time, closed} (~10 мс)
     B->>A: evaluate(сеть сценария, fixed) и evaluate(…, rl)
     Note over A: base.net.xml + патч изменений,<br/>SUMO + DQN-агенты (~15–30 с на режим, кэш)
-    A-->>B: avg_waiting_time, per_tls: {tls: avg_queue_length}, …
-    B->>B: поправка задержек на подходах к светофорам,<br/>сводка по району, запись результатов
+    A-->>B: avg_travel_time, per_tls: {tls: avg_delay_rate, avg_queue_length}, …
+    B->>B: поправка задержек на подходах к светофорам,<br/>согласование с SUMO, сводка по району, запись в БД
     B-->>F: прогноз по 836 участкам + сводка
     F->>B: GET /api/compare?a=база&b=сценарий
     F-->>U: тепловая карта «До / После / Разница»
