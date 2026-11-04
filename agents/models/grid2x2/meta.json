@@ -1,0 +1,169 @@
+{
+  "scenario": "grid2x2",
+  "net_file": "agents/networks/grid2x2/grid2x2.net.xml",
+  "best_episode": 12,
+  "episodes": 30,
+  "seed": 0,
+  "validation": {
+    "avg_queue_length": 1.9654761904761906,
+    "episode": 12,
+    "avg_waiting_time": 11.237678855325914,
+    "avg_travel_time": 74.21727609962905
+  },
+  "baseline_validation": {
+    "fixed": {
+      "avg_queue_length": 6.9836309523809526,
+      "avg_waiting_time": 36.15818759936407,
+      "avg_travel_time": 101.14308426073131
+    },
+    "actuated": {
+      "avg_queue_length": 5.674107142857142,
+      "avg_waiting_time": 26.97111817700053,
+      "avg_travel_time": 89.47323794382618
+    }
+  },
+  "env_params": {
+    "delta_time": 5,
+    "yellow_time": 3,
+    "min_green": 5,
+    "max_green": 60,
+    "time_to_teleport": 300
+  },
+  "reward_scale": 0.1,
+  "max_wait_guard_s": 90.0,
+  "dqn_params": {
+    "learning_rate": 0.001,
+    "buffer_size": 50000,
+    "learning_starts": 1000,
+    "batch_size": 64,
+    "gamma": 0.95,
+    "train_freq": 1,
+    "gradient_steps": 1,
+    "target_update_interval": 500,
+    "exploration_fraction": 0.4,
+    "exploration_initial_eps": 1.0,
+    "exploration_final_eps": 0.02,
+    "policy_kwargs": {
+      "net_arch": [
+        64,
+        64
+      ]
+    }
+  },
+  "observation_layout": {
+    "A0": [
+      "phase_0",
+      "phase_1",
+      "phase_2",
+      "phase_3",
+      "can_switch",
+      "queue_N_through",
+      "queue_N_left",
+      "queue_E_through",
+      "queue_E_left",
+      "queue_S_through",
+      "queue_S_left",
+      "queue_W_through",
+      "queue_W_left",
+      "wait_N_through",
+      "wait_N_left",
+      "wait_E_through",
+      "wait_E_left",
+      "wait_S_through",
+      "wait_S_left",
+      "wait_W_through",
+      "wait_W_left"
+    ],
+    "A1": [
+      "phase_0",
+      "phase_1",
+      "phase_2",
+      "phase_3",
+      "can_switch",
+      "queue_N_through",
+      "queue_N_left",
+      "queue_E_through",
+      "queue_E_left",
+      "queue_S_through",
+      "queue_S_left",
+      "queue_W_through",
+      "queue_W_left",
+      "wait_N_through",
+      "wait_N_left",
+      "wait_E_through",
+      "wait_E_left",
+      "wait_S_through",
+      "wait_S_left",
+      "wait_W_through",
+      "wait_W_left"
+    ],
+    "B0": [
+      "phase_0",
+      "phase_1",
+      "phase_2",
+      "phase_3",
+      "can_switch",
+      "queue_N_through",
+      "queue_N_left",
+      "queue_E_through",
+      "queue_E_left",
+      "queue_S_through",
+      "queue_S_left",
+      "queue_W_through",
+      "queue_W_left",
+      "wait_N_through",
+      "wait_N_left",
+      "wait_E_through",
+      "wait_E_left",
+      "wait_S_through",
+      "wait_S_left",
+      "wait_W_through",
+      "wait_W_left"
+    ],
+    "B1": [
+      "phase_0",
+      "phase_1",
+      "phase_2",
+      "phase_3",
+      "can_switch",
+      "queue_N_through",
+      "queue_N_left",
+      "queue_E_through",
+      "queue_E_left",
+      "queue_S_through",
+      "queue_S_left",
+      "queue_W_through",
+      "queue_W_left",
+      "wait_N_through",
+      "wait_N_left",
+      "wait_E_through",
+      "wait_E_left",
+      "wait_S_through",
+      "wait_S_left",
+      "wait_W_through",
+      "wait_W_left"
+    ]
+  },
+  "agents": {
+    "A0": {
+      "file": "tls_A0.zip",
+      "obs_dim": 21,
+      "n_actions": 4
+    },
+    "A1": {
+      "file": "tls_A1.zip",
+      "obs_dim": 21,
+      "n_actions": 4
+    },
+    "B0": {
+      "file": "tls_B0.zip",
+      "obs_dim": 21,
+      "n_actions": 4
+    },
+    "B1": {
+      "file": "tls_B1.zip",
+      "obs_dim": 21,
+      "n_actions": 4
+    }
+  }
+}
